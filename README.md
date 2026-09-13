@@ -1,5 +1,7 @@
 # C.A. Public Information Work Portal — Template
 
+[Demo](https://gyration-finale-flatterer.ngrok-free.dev/login.php)
+
 A self-hosted web portal built for **Cocaine Anonymous Public Information (PI) committees**, covering the day-to-day work described in the official [C.A. World Service Conference Public Information (WSCPI) Handbook](https://pi.ca.org/wp-content/uploads/2025/12/2025-Revised-PI-Handbook.pdf): member/customer records, print materials & inventory, outreach requests, finances, a shared calendar, a document archive, and role-based access matching the committee structure suggested in the Handbook.
 
 This repository is a **template**: it was extracted from a real, working district deployment (Region South, Netherlands) so that other districts, areas, or regions anywhere in the world can adopt it, translate it into their own language, and configure it for their own committee.
