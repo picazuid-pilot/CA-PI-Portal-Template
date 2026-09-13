@@ -10,6 +10,10 @@ This repository is a **template**: it was extracted from a real, working distric
 
 ---
 
+<img width="1840" height="984" alt="Screenshot from 2026-09-13 15-45-30" src="https://github.com/user-attachments/assets/5ed6991a-2ada-4538-9689-eec3ada1abc4" />
+<img width="1840" height="984" alt="Screenshot from 2026-09-13 15-45-52" src="https://github.com/user-attachments/assets/e92fcf1d-755c-49cd-a0d8-32bb3c83719e" />
+
+
 ## What this portal does
 
 Organised around the roles in the WSCPI Handbook (see [`docs/roles.md`](docs/roles.md) for the full list with suggested sobriety/experience guidelines per role):
