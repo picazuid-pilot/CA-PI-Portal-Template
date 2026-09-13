@@ -36,6 +36,7 @@ Organised around the roles in the WSCPI Handbook (see [`docs/roles.md`](docs/rol
 2. **Edit `district.php`** — this is the *only* file you need to change. It has inline comments for every setting: your committee's name, colours, map location, invite code, email, and (optionally) cloud storage.
 3. **Upload**, then visit `yoursite.com/login.php`, click "Create account", enter the invite code you set, and create the first account.
 4. **Make yourself admin**: the very first account is not automatically an admin — open `data/users.json` on your hosting (via FTP/file manager) and add `"admin"` to that user's `roles` array. After that, all further role management happens in the portal itself (Members → Member Management).
+<img width="807" height="309" alt="Screenshot from 2026-09-13 13-53-40" src="https://github.com/user-attachments/assets/f42a27b4-ac8d-4819-b6de-d2b70159acde" />
 5. Explore the dashboard, try the `dummy`/`dummy` demo login to see it from a regular member's point of view, and start customising.
 
 See [`docs/setup.md`](docs/setup.md) for a more detailed walkthrough (hosting quirks, SMTP setup, storage backends, backups), and [`docs/personalization-checklist.md`](docs/personalization-checklist.md) for an in-order checklist of everything worth personalizing for your own district (invite code, email provider setup, and — importantly — how to route the right notifications to the right committee roles).
