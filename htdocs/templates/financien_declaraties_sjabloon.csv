@@ -1,0 +1,3 @@
+type,aanvragerNaam,bedrag,datum,omschrijving,leverancier
+declaratie,Jan Jansen,23.50,2026-05-15,Benzinekosten bezoek instellingen
+bestelling_aanvraag,Voorzitter Regio Zuid,150.00,2026-05-20,Folderrekken voor 3 nieuwe locaties,Bruynzeel
