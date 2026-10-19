@@ -89,10 +89,13 @@ if (empty($_SESSION['user_id'])) {
     <div class="toolbar"><strong>Overview map — locations &amp; status</strong></div>
     <div id="map"></div>
     <div style="margin-top:10px; font-size:12.5px; color:var(--grey);">
-      <span class="status-dot groen"></span>&lt; 30 days &nbsp;
-      <span class="status-dot geel"></span>30–60 days &nbsp;
-      <span class="status-dot oranje"></span>60–90 days &nbsp;
-      <span class="status-dot rood"></span>&gt; 90 days &nbsp;
+      <span class="status-dot donkergroen"></span>&lt; 30 days &nbsp;
+      <span class="status-dot lichtgroen"></span>30–60 days &nbsp;
+      <span class="status-dot geelgroen"></span>60–90 days &nbsp;
+      <span class="status-dot geel"></span>90 days – 6 mo &nbsp;
+      <span class="status-dot oranjegeel"></span>6–9 mo &nbsp;
+      <span class="status-dot rood"></span>9–12 mo &nbsp;
+      <span class="status-dot donkerrood"></span>&gt; 12 mo &nbsp;
       <span class="status-dot grijs"></span>no activity yet
     </div>
   </div>
@@ -105,7 +108,10 @@ if (empty($_SESSION['user_id'])) {
 </div>
 
 <script>
-const statusKleuren = { groen: '#2f8f4e', geel: '#d4a417', oranje: '#e07a2f', rood: '#c9432f', grijs: '#9aa3a0' };
+const statusKleuren = {
+  donkergroen: '#1f6e38', lichtgroen: '#6fbf73', geelgroen: '#a9c93f', geel: '#d4a417',
+  oranjegeel: '#e0922f', rood: '#c9432f', donkerrood: '#7a1f1f', grijs: '#9aa3a0',
+};
 
 const map = new maplibregl.Map({
   container: 'map',

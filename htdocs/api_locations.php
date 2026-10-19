@@ -42,14 +42,27 @@ function geocode_country_param() {
 }
 
 // Determines the status colour based on the most recent activity date.
-// green <30 days, yellow 30-60, orange 60-90, red >90, grey = nothing done yet.
+// The longer ago, the more "alarming" the colour — from dark green (just
+// done) through the yellow/orange middle to dark red (a full year of
+// nothing), and grey for locations with no activity recorded at all.
+//   <30 days          dark green
+//   30-60 days        light green
+//   60-90 days        yellow-green
+//   90 days-6 months  yellow
+//   6-9 months        orange-yellow
+//   9-12 months       red
+//   >12 months        dark red
+//   no activity yet   grey
 function status_kleur($laatsteActiviteit) {
     if (!$laatsteActiviteit) return ['kleur' => 'grijs', 'dagen' => null];
     $dagen = floor((time() - strtotime($laatsteActiviteit)) / 86400);
-    if ($dagen < 30) $kleur = 'groen';
-    elseif ($dagen < 60) $kleur = 'geel';
-    elseif ($dagen < 90) $kleur = 'oranje';
-    else $kleur = 'rood';
+    if ($dagen < 30) $kleur = 'donkergroen';
+    elseif ($dagen < 60) $kleur = 'lichtgroen';
+    elseif ($dagen < 90) $kleur = 'geelgroen';
+    elseif ($dagen < 180) $kleur = 'geel';
+    elseif ($dagen < 270) $kleur = 'oranjegeel';
+    elseif ($dagen < 365) $kleur = 'rood';
+    else $kleur = 'donkerrood';
     return ['kleur' => $kleur, 'dagen' => (int)$dagen];
 }
 

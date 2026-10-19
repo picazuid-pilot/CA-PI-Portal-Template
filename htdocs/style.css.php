@@ -48,6 +48,14 @@ $dark30  = mix($primary, [0, 0, 0], 0.30);
   --status-rood: #c9432f;
   --status-grijs: #9aa3a0;
 
+  /* Extended scale for the location activity tracker (status-dot), from
+     just active (dark green) to a year of nothing (dark red). */
+  --status-donkergroen: #1f6e38;
+  --status-lichtgroen: #6fbf73;
+  --status-geelgroen: #a9c93f;
+  --status-oranjegeel: #e0922f;
+  --status-donkerrood: #7a1f1f;
+
   --font: <?= FONT_FAMILY ?>;
 }
 
@@ -97,6 +105,12 @@ a { color: var(--primary); }
 .status-dot.oranje { background: var(--status-oranje); }
 .status-dot.rood { background: var(--status-rood); }
 .status-dot.grijs { background: var(--status-grijs); }
+/* Location activity tracker: finer scale, see status_kleur() in api_locations.php */
+.status-dot.donkergroen { background: var(--status-donkergroen); }
+.status-dot.lichtgroen { background: var(--status-lichtgroen); }
+.status-dot.geelgroen { background: var(--status-geelgroen); }
+.status-dot.oranjegeel { background: var(--status-oranjegeel); }
+.status-dot.donkerrood { background: var(--status-donkerrood); }
 
 .badge {
   display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 600;
