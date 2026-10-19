@@ -86,9 +86,24 @@ if (empty($_SESSION['user_id'])) {
   </div>
 
   <div class="card" style="margin-bottom:20px;">
-    <div class="toolbar"><strong>Overview map — locations &amp; status</strong></div>
+    <div class="toolbar">
+      <strong>Overview map — locations &amp; status</strong>
+      <div style="display:flex; gap:16px; align-items:center; font-size:12.5px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:5px; margin:0; cursor:pointer;">
+          <input type="checkbox" id="map-toggle-locations" checked onchange="toggleLocationsLayer()" style="width:auto;" /> Locations &amp; activity
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; margin:0; cursor:pointer;">
+          <input type="checkbox" id="map-toggle-members" checked onchange="toggleMembersLayer()" style="width:auto;" /> PI members
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; margin:0; cursor:pointer;">
+          <input type="checkbox" id="map-toggle-radius" onchange="toggleMembersRadius()" style="width:auto;" /> Coverage radius
+          <input type="number" id="map-radius-km" value="<?= MEMBER_REGION_RADIUS_KM ?>" min="1" max="500" step="1" style="width:56px; padding:3px 6px;" onchange="updateMembersRadius()" />
+          <span style="color:var(--grey);">km</span>
+        </label>
+      </div>
+    </div>
     <div id="map"></div>
-    <div style="margin-top:10px; font-size:12.5px; color:var(--grey);">
+    <div id="map-legend-dots" style="margin-top:10px; font-size:12.5px; color:var(--grey);">
       <span class="status-dot donkergroen"></span>&lt; 30 days &nbsp;
       <span class="status-dot lichtgroen"></span>30–60 days &nbsp;
       <span class="status-dot geelgroen"></span>60–90 days &nbsp;
@@ -121,6 +136,11 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+// Markers are kept in these arrays so the on-map toggle checkboxes can
+// show/hide them afterwards without reloading the map.
+let locationMarkers = [];
+let memberMarkersAndPositions = []; // [{ marker, lat, lng }]
+
 map.on('load', async () => {
   const res = await fetch('api_locations.php?action=geojson');
   const geojson = await res.json();
@@ -135,11 +155,32 @@ map.on('load', async () => {
       (f.properties.dagenSindsLaatsteActiviteit === null ? 'No activity yet' : f.properties.dagenSindsLaatsteActiviteit + ' days since last activity') +
       `<br><a href="locations.php?open=${encodeURIComponent(f.properties.id)}" style="display:inline-block; margin-top:6px; background:var(--primary); color:#fff; text-decoration:none; padding:4px 10px; border-radius:5px; font-size:12px; font-weight:600;">Edit</a>`
     );
-    new maplibregl.Marker({ element: el }).setLngLat(f.geometry.coordinates).setPopup(popup).addTo(map);
+    const marker = new maplibregl.Marker({ element: el }).setLngLat(f.geometry.coordinates).setPopup(popup).addTo(map);
+    locationMarkers.push(marker);
   });
 
   loadMembersOnMap();
 });
+
+// ---- Map toggles (locations/activity dots, PI members, coverage radius) --
+
+function toggleLocationsLayer() {
+  const show = document.getElementById('map-toggle-locations').checked;
+  locationMarkers.forEach(m => { m.getElement().style.display = show ? '' : 'none'; });
+  document.getElementById('map-legend-dots').style.display = show ? '' : 'none';
+}
+
+function toggleMembersLayer() {
+  const show = document.getElementById('map-toggle-members').checked;
+  memberMarkersAndPositions.forEach(({ marker }) => { marker.getElement().style.display = show ? 'flex' : 'none'; });
+  // Hiding the members also hides anything shown relative to them.
+  if (!show) {
+    hideCoverageCircle();
+    setMembersRadiusVisible(false);
+  } else if (document.getElementById('map-toggle-radius').checked) {
+    setMembersRadiusVisible(true);
+  }
+}
 
 // ---- PI members with a coverage region also shown on this map -------------------
 // A different icon (blue, with initial) than the green location dots above.
@@ -180,6 +221,44 @@ function hideCoverageCircle() {
   if (map.getLayer(CIRCLE_SOURCE_ID + '-line')) map.setLayoutProperty(CIRCLE_SOURCE_ID + '-line', 'visibility', 'none');
 }
 
+// ---- Adjustable coverage radius around ALL members at once ---------------
+// Independent of the hover-only circle above: toggled with its own checkbox
+// and its own km value, and stays on regardless of what the mouse is doing.
+
+const MEMBERS_RADIUS_SOURCE_ID = 'members-radius-circles';
+
+function rebuildMembersRadiusLayer() {
+  const km = parseFloat(document.getElementById('map-radius-km').value) || 0;
+  const data = {
+    type: 'FeatureCollection',
+    features: memberMarkersAndPositions.map(({ lat, lng }) => makeCirclePolygon(lat, lng, km)),
+  };
+  if (map.getSource(MEMBERS_RADIUS_SOURCE_ID)) {
+    map.getSource(MEMBERS_RADIUS_SOURCE_ID).setData(data);
+  } else {
+    map.addSource(MEMBERS_RADIUS_SOURCE_ID, { type: 'geojson', data });
+    map.addLayer({ id: MEMBERS_RADIUS_SOURCE_ID + '-fill', type: 'fill', source: MEMBERS_RADIUS_SOURCE_ID, paint: { 'fill-color': '#3b6fa0', 'fill-opacity': 0.12 } });
+    map.addLayer({ id: MEMBERS_RADIUS_SOURCE_ID + '-line', type: 'line', source: MEMBERS_RADIUS_SOURCE_ID, paint: { 'line-color': '#3b6fa0', 'line-width': 1.5, 'line-opacity': 0.5 } });
+  }
+}
+
+function setMembersRadiusVisible(visible) {
+  if (!map.getLayer(MEMBERS_RADIUS_SOURCE_ID + '-fill')) return;
+  const v = visible ? 'visible' : 'none';
+  map.setLayoutProperty(MEMBERS_RADIUS_SOURCE_ID + '-fill', 'visibility', v);
+  map.setLayoutProperty(MEMBERS_RADIUS_SOURCE_ID + '-line', 'visibility', v);
+}
+
+function toggleMembersRadius() {
+  const show = document.getElementById('map-toggle-radius').checked;
+  if (show) { rebuildMembersRadiusLayer(); setMembersRadiusVisible(true); }
+  else setMembersRadiusVisible(false);
+}
+
+function updateMembersRadius() {
+  if (document.getElementById('map-toggle-radius').checked) rebuildMembersRadiusLayer();
+}
+
 async function loadMembersOnMap() {
   const res = await fetch('api_members.php?action=profielen_overzicht', { cache: 'no-store' });
   const data = await res.json();
@@ -217,9 +296,18 @@ async function loadMembersOnMap() {
       });
       popup.on('close', () => { popupOpen = false; });
 
-      new maplibregl.Marker({ element: el }).setLngLat([geo.lng, geo.lat]).addTo(map);
+      const marker = new maplibregl.Marker({ element: el }).setLngLat([geo.lng, geo.lat]).addTo(map);
+      if (!document.getElementById('map-toggle-members').checked) el.style.display = 'none';
+      memberMarkersAndPositions.push({ marker, lat: geo.lat, lng: geo.lng });
     } catch (e) { /* geocoding failed for this region — just skip it */ }
   }));
+
+  // All members are now geocoded and in memberMarkersAndPositions — build
+  // the adjustable radius layer now if the checkbox was already switched on.
+  if (document.getElementById('map-toggle-radius').checked) {
+    rebuildMembersRadiusLayer();
+    setMembersRadiusVisible(true);
+  }
 }
 
 let datumformaatVolgorde = 'dmy'; // 'dmy' | 'mdy' | 'ymd'
