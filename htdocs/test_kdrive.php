@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/config.php';
+require_it_pagina(); // logged-in IT admins only
 require __DIR__ . '/lib_kdrive.php';
 header('Content-Type: text/plain; charset=utf-8');
 

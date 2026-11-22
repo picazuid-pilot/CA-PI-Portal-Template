@@ -39,6 +39,9 @@ switch ($action) {
 
     case 'aanvraag_extern_create': {
         $in = json_input();
+        $extSleutel = 'x:' . sha1(klant_ip());
+        if (!rate_limit_toegestaan($extSleutel, 8, 3600)) respond(['error' => 'Too many requests were sent from this address. Please try again later.'], 429);
+        rate_limit_registreer($extSleutel);
         if (trim($in['website'] ?? '') !== '') respond(['ok' => true]); // honeypot
 
         $instellingNaam = trim($in['instellingNaam'] ?? '');
@@ -459,6 +462,34 @@ switch ($action) {
         if (!$magVerwijderen) respond(['error' => 'You are not permitted to do this.'], 403);
         unlink(agenda_path($id));
         respond(['deleted' => true]);
+        break;
+    }
+
+    // ================= CALENDAR SUBSCRIPTION (iCal feed) =================
+    // Calendar apps (Thunderbird, Google, Apple, Outlook) cannot log in with a
+    // portal password. So every member gets a personal, unguessable link
+    // (token) to agenda.ics.php. Anyone who knows the link can READ the
+    // agenda; with "nieuw" the old link becomes invalid immediately.
+
+    case 'agenda_abonnement': {
+        $in = json_input();
+        $tokensPad = DATA_DIR . '/agenda_tokens.json';
+        $tokens = read_json($tokensPad, []);
+        $uid = $_SESSION['user_id'];
+        $bestaand = null;
+        $idx = null;
+        foreach ($tokens as $i => $t) {
+            if (($t['userId'] ?? '') === $uid) { $bestaand = $t; $idx = $i; break; }
+        }
+        if (!$bestaand || !empty($in['nieuw'])) {
+            $bestaand = ['userId' => $uid, 'token' => veilige_token(), 'createdAt' => time() * 1000];
+            if ($idx !== null) $tokens[$idx] = $bestaand; else $tokens[] = $bestaand;
+            write_json($tokensPad, array_values($tokens));
+        }
+        $schema = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $basis = $schema . '://' . $_SERVER['HTTP_HOST'] . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+        $url = $basis . '/agenda.ics.php?token=' . $bestaand['token'];
+        respond(['url' => $url, 'webcalUrl' => preg_replace('#^https?://#', 'webcal://', $url)]);
         break;
     }
 

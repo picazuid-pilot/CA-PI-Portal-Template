@@ -31,7 +31,7 @@ if (empty($_SESSION['user_id'])) {
         <a class="sub-btn" href="locations.php?tab=bulk">Bulk import</a>
         <a class="sub-btn" href="locations.php?tab=campagnes">Campaigns</a>
         <a class="sub-btn" href="locations.php?tab=targets">Targets</a>
-        <a class="sub-btn" href="locations.php?tab=campagne_ideeen">Campaign ideas</a>
+        <a class="sub-btn" href="locations.php?tab=campagne_ideeen">Idea development</a>
       </div>
     </div>
 
@@ -75,10 +75,10 @@ if (empty($_SESSION['user_id'])) {
       <div class="sub-buttons">
         <a class="sub-btn" href="members.php">Profiles</a>
         <a class="sub-btn" href="committee_roles.php">Committee Service Roles</a>
-        <?php if (heeft_rol(['admin'])): ?>
+        <?php if (heeft_rol(['admin', 'chair'])): ?>
         <a class="sub-btn" href="member_management.php">Member Management</a>
         <?php else: ?>
-        <button disabled title="IT/admin only">Member Management (IT)</button>
+        <button disabled title="IT and chairperson only">Member Management</button>
         <?php endif; ?>
       </div>
     </div>

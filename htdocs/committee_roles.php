@@ -7,7 +7,7 @@ if (empty($_SESSION['user_id'])) {
 
 require __DIR__ . '/committee_roles_defaults.php';
 
-$isAdmin = heeft_rol(['admin']);
+$isAdmin = heeft_rol(['admin', 'chair']); // IT and chairperson may adjust the committee roles
 $aangepast = read_json(DATA_DIR . '/committee_roles_custom.json', null);
 $rollen = $aangepast ?: standard_committee_roles();
 ?>
@@ -48,7 +48,7 @@ $rollen = $aangepast ?: standard_committee_roles();
         <span style="width:12px; height:12px; border-radius:3px; background:<?= htmlspecialchars(haal_kleuren_op()[$r['sleutel']] ?? '#9aa3a0') ?>; display:inline-block;"></span>
         <strong style="font-size:16px;"><?= htmlspecialchars($r['naam']) ?></strong>
       </div>
-      <?php if ($isAdmin): ?><button class="secondary" onclick='openEditForm(<?= json_encode($r) ?>)'>✎ Edit</button><?php endif; ?>
+      <?php if ($isAdmin): ?><button class="secondary" onclick="openEditForm(<?= htmlspecialchars(json_encode($r), ENT_QUOTES) ?>)">✎ Edit</button><?php endif; ?>
     </div>
     <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:10px 0; font-size:12.5px; color:var(--grey);">
       <div><strong style="color:var(--ink);">Sobriety:</strong> <?= htmlspecialchars($r['sobriety']) ?></div>

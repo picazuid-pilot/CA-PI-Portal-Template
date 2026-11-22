@@ -106,7 +106,7 @@ async function laadLiteratuur() {
       <input type="number" min="0" value="0" data-lit-naam="${escapeHtml(it.naam)}" style="width:70px;" />
     </div>`).join('');
 }
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 async function versturen() {
   const errEl = document.getElementById('e-error');

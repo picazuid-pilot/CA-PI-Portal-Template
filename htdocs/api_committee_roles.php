@@ -2,7 +2,7 @@
 require __DIR__ . '/config.php';
 header('Content-Type: application/json; charset=utf-8');
 require_login();
-require_role(['admin']); // this whole module is IT-only
+require_role(['admin', 'chair']); // setting up the committee: IT and chairperson
 require __DIR__ . '/committee_roles_defaults.php';
 
 $action = $_GET['action'] ?? '';

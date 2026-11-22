@@ -51,7 +51,7 @@ $magNotulen = heeft_rol(['admin', 'chair', 'secretary']);
 <div id="voorbeeld-overlay" style="display:none; position:fixed; z-index:999; pointer-events:none; background:#111; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.35); overflow:hidden;">
   <img id="voorbeeld-img" style="display:none; max-width:420px; max-height:420px; display:block;" />
   <video id="voorbeeld-video" style="display:none; max-width:420px; max-height:420px; display:block;" muted loop playsinline></video>
-  <iframe id="voorbeeld-pdf" style="display:none; width:340px; height:440px; border:none;"></iframe>
+  <iframe id="voorbeeld-pdf" style="display:none; width:340px; height:476px; margin-top:-36px; clip-path:inset(36px 0 0 0); border:none;"></iframe>
 </div>
 
 <script>
@@ -60,7 +60,8 @@ const CATEGORIE = 'notulen_agenda';
 let itemsData = [];
 let huidigBewerkItemId = null;
 
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function veiligeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : '#'; } // alleen http(s)-links klikbaar
 function sluitModal(id) { document.getElementById(id).style.display = 'none'; }
 
 async function laadItems() {
@@ -85,12 +86,12 @@ function renderItems() {
 
       <div style="flex:0 0 auto; display:flex; align-items:center; gap:6px;">
         ${item.downloadUrl
-          ? `<a href="${escapeHtml(item.downloadUrl)}" target="_blank" rel="noopener" class="btn-primary" title="Download" style="font-size:18px; padding:8px 12px;">⬇</a>`
+          ? `<a href="${escapeHtml(veiligeUrl(item.downloadUrl))}" target="_blank" rel="noopener" class="btn-primary" title="Download" style="font-size:18px; padding:8px 12px;">📎</a>`
           : `<span class="badge grijs" title="No download link set yet">no link</span>`}
         ${magNotulen ? `
           <input type="file" id="thumb-input-${item.id}" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,.pdf" style="display:none;" onchange="thumbnailUploaden('${item.id}', this)" />
           <button class="secondary" onclick="document.getElementById('thumb-input-${item.id}').click()" title="Replace preview image/video">🖼️</button>
-          <button class="secondary" onclick='openItemForm(${JSON.stringify(item)})' title="Edit">✎</button>
+          <button class="secondary" onclick="openItemForm(${escapeHtml(JSON.stringify(item))})" title="Edit">✎</button>
           <button class="secondary" onclick="itemVerwijderen('${item.id}')" title="Delete">✕</button>
         ` : ''}
       </div>
@@ -176,7 +177,7 @@ function toonGrootVoorbeeld(evt, type, pad) {
     video.src = src; video.style.display = 'block';
     video.currentTime = 0; video.play().catch(() => {}); // autoplay may be blocked, in which case the still frame just stays
   } else if (type === 'pdf') {
-    pdf.src = src; pdf.style.display = 'block';
+    pdf.src = src + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH'; pdf.style.display = 'block'; // PDF-bovenbalk verbergen
   }
   overlay.style.display = 'block';
   verplaatsGrootVoorbeeld(evt);

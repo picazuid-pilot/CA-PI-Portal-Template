@@ -24,7 +24,9 @@ Organised around the roles in the WSCPI Handbook (see [`docs/roles.md`](docs/rol
 - **Finance** — transactions, balance, reimbursement requests, resale/on-account tracking, joint-purchase splitting, CSV export, and configurable local or cloud (Google Drive / Infomaniak kDrive) attachment storage.
 - **Drive Database** — a curated, downloadable-file catalogue with hover-preview thumbnails (image, video, or PDF), split into a general archive and a Secretary-managed Minutes & Agendas section.
 - **Members** — self-service profiles (with photo, contact info, and an optional "coverage region" shown on a map), a full member directory, and IT-only role/account management.
-- **A safe demo account** (`dummy` / `dummy`) that can browse every single page but cannot create, edit, delete, or submit anything — handy for showing the portal to your committee before rolling it out.
+- **Idea development** — physical and online ideas, campaigns and targets, each with file attachments.
+- **Temporary IT rights** — a committee member can request IT rights when IT is unavailable; IT gets an email with a link to approve (and pick the duration: 15 minutes to 4 hours) or reject. The rights expire on their own and never include granting IT roles or touching IT accounts.
+- **An optional read-only demo account** (`dummy` / `dummy`) that can browse every page but cannot create, edit, delete, or submit anything — handy for presentations. It is **off by default**; switch it on in `district.php` (`DEMO_ACCOUNT_ENABLED`).
 
 ## Requirements
 
@@ -38,21 +40,22 @@ Organised around the roles in the WSCPI Handbook (see [`docs/roles.md`](docs/rol
 
 ## Getting started (5-minute version)
 
-1. **Copy** the contents of `htdocs/` to your hosting's web root.
+1. **Copy** the contents of `htdocs/` (English) or `htdocs-nl/` (Dutch / Nederlands) to your hosting's web root.
 2. **Edit `district.php`** — this is the *only* file you need to change. It has inline comments for every setting: your committee's name, colours, map location, invite code, email, and (optionally) cloud storage.
 3. **Upload**, then visit `yoursite.com/login.php`, click "Create account", enter the invite code you set, and create the first account.
 4. **Make yourself admin**: the very first account is not automatically an admin — open `data/users.json` on your hosting (via FTP/file manager) and add `"admin"` to that user's `roles` array. After that, all further role management happens in the portal itself (Members → Member Management).
 
 <img width="807" height="309" alt="Screenshot from 2026-09-13 13-53-40" src="https://github.com/user-attachments/assets/f42a27b4-ac8d-4819-b6de-d2b70159acde" />
 
-5. Explore the dashboard, try the `dummy`/`dummy` demo login to see it from a regular member's point of view, and start customising.
+5. Explore the dashboard and start customising. (Want a read-only demo login for presentations? Enable `DEMO_ACCOUNT_ENABLED` in `district.php` — it is off by default.)
 
 See [`docs/setup.md`](docs/setup.md) for a more detailed walkthrough (hosting quirks, SMTP setup, storage backends, backups), and [`docs/personalization-checklist.md`](docs/personalization-checklist.md) for an in-order checklist of everything worth personalizing for your own district (invite code, email provider setup, and — importantly — how to route the right notifications to the right committee roles).
 
 ## Repository structure
 
 ```
-htdocs/                  → everything you upload to your web host
+htdocs/                  → everything you upload to your web host (English)
+htdocs-nl/               → the same portal in Dutch (Nederlandse versie) — same features, Dutch UI
   district.php           → THE file you edit — all per-district settings
   config.php             → shared core logic (leave alone)
   api_*.php              → backend endpoints, one per module

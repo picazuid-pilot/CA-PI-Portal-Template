@@ -8,6 +8,7 @@
  * Usage: go to test_email.php?to=your@email.com in the browser.
  */
 require __DIR__ . '/config.php';
+require_it_pagina(); // logged-in IT admins only
 header('Content-Type: text/plain; charset=utf-8');
 
 $to = $_GET['to'] ?? '';

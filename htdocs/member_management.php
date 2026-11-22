@@ -4,7 +4,9 @@ if (empty($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
-if (!heeft_rol(['admin'])) {
+$isIT = heeft_vaste_it();   // permanent IT: also manage accounts/IT roles
+$isITNu = heeft_rol(['admin']); // permanent or temporary IT: colours etc.
+if (!heeft_rol(['admin', 'chair'])) {
     header('Location: index.php');
     exit;
 }
@@ -59,6 +61,15 @@ if (!heeft_rol(['admin'])) {
     </table>
   </div>
 
+  <?php if ($isIT): ?>
+  <div class="card" id="it-aanvragen-kaart" style="margin-top:16px; display:none;">
+    <strong>Temporary IT rights</strong>
+    <p style="color:var(--grey); font-size:12.5px; margin:4px 0 10px;">Members can request temporary IT rights; you receive an email with a link for this. Here you can also approve or reject them, or end a running grant immediately.</p>
+    <div id="it-aanvragen-lijst"></div>
+  </div>
+  <?php endif; ?>
+
+  <?php if ($isITNu): ?>
   <div class="card" style="margin-top:16px;">
     <strong>Colours</strong>
     <p style="color:var(--grey); font-size:12.5px; margin:4px 0 12px;">
@@ -71,10 +82,12 @@ if (!heeft_rol(['admin'])) {
       <button class="primary" onclick="opslaanKleuren()">Save colours</button>
     </div>
   </div>
+  <?php endif; ?>
 
 </div>
 
 <script>
+const isIT = <?= $isIT ? "true" : "false" ?>; // permanent IT: email/password buttons
 let ledenData = [];
 let rollenLijst = {};
 let kleurenData = {};
@@ -107,9 +120,42 @@ async function opslaanKleuren() {
   });
   alert('Colours saved.');
 }
-laadKleuren();
+// ---- Temporary IT rights (permanent IT only) ----
+async function laadITAanvragen() {
+  const kaart = document.getElementById('it-aanvragen-kaart'); if (!kaart) return;
+  const res = await fetch('api_it_tijdelijk.php?action=aanvragen_list', { cache: 'no-store' });
+  if (!res.ok) return;
+  const d = await res.json();
+  const tijd = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  kaart.style.display = d.aanvragen.length ? '' : 'none';
+  document.getElementById('it-aanvragen-lijst').innerHTML = d.aanvragen.map(a => a.status === 'wacht' ? `
+    <div style="padding:8px 0; border-top:1px solid #eef1ef;">
+      <strong>${escapeHtml(a.naam)}</strong> is requesting temporary IT rights${a.reden ? ': “' + escapeHtml(a.reden) + '”' : ''}
+      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+        ${d.keuzes.map(m => `<button class="secondary" onclick="itBesluit(${escapeHtml(JSON.stringify(a.id))}, 'goedkeuren', ${m})">✓ ${m} min</button>`).join('')}
+        <button class="secondary" style="color:#c9432f; border-color:#c9432f;" onclick="itBesluit(${escapeHtml(JSON.stringify(a.id))}, 'afwijzen', 0)">✕ Reject</button>
+      </div>
+    </div>` : `
+    <div style="padding:8px 0; border-top:1px solid #eef1ef; display:flex; justify-content:space-between; align-items:center;">
+      <span><span class="badge groen">active</span> <strong>${escapeHtml(a.naam)}</strong> until ${tijd(a.geldigTot)}</span>
+      <button class="secondary" onclick="itIntrekken(${escapeHtml(JSON.stringify(a.id))})">End now</button>
+    </div>`).join('');
+}
+async function itBesluit(id, besluit, minuten) {
+  const res = await fetch('api_it_tijdelijk.php?action=aanvraag_beslissen', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, besluit, minuten }) });
+  const d = await res.json();
+  if (!res.ok) alert(d.error || 'Failed.');
+  laadITAanvragen();
+}
+async function itIntrekken(id) {
+  await fetch('api_it_tijdelijk.php?action=aanvraag_intrekken_door_it', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  laadITAanvragen();
+}
+laadITAanvragen();
 
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+if (document.getElementById('kleuren-lijst')) laadKleuren(); // colours are IT only
+
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 function sluitModal(id) { document.getElementById(id).style.display = 'none'; }
 
@@ -155,14 +201,32 @@ async function laadLeden() {
         <div style="display:flex; flex-wrap:wrap; gap:6px 14px;">
           ${Object.entries(rollenLijst).map(([sleutel, label]) => `
             <label style="display:flex; align-items:center; gap:4px; font-size:12.5px; margin:0;">
-              <input type="checkbox" style="width:auto;" data-lid="${l.id}" value="${sleutel}" ${l.roles.includes(sleutel) ? 'checked' : ''} />
+              <input type="checkbox" style="width:auto;" data-lid="${escapeHtml(l.id)}" value="${sleutel}" ${l.roles.includes(sleutel) ? 'checked' : ''} ${l.vergrendeld ? 'disabled' : ''} />
               ${escapeHtml(label)}
             </label>
           `).join('')}
         </div>
       </td>
-      <td><button class="primary" onclick="opslaanRollen('${l.id}')">Save</button> <a class="btn-secondary" href="profile.php?id=${encodeURIComponent(l.id)}" style="display:inline-block;">Profile</a> <button class="secondary" style="color:#c9432f; border-color:#c9432f;" onclick="gebruikerVerwijderen('${l.id}', ${JSON.stringify(l.naam)})">✕</button></td>
+      <td>${l.vergrendeld ? '<span class="badge grijs" title="Only the IT administrator can change this account">IT administrator</span> ' : `<button class="primary" onclick="opslaanRollen(${escapeHtml(JSON.stringify(l.id))})">Save</button> `}<a class="btn-secondary" href="profile.php?id=${encodeURIComponent(l.id)}" style="display:inline-block;">Profile</a> ${isIT ? `<button class="secondary" onclick="emailWijzigen(${escapeHtml(JSON.stringify(l.id))}, ${escapeHtml(JSON.stringify(l.email))})" title="Change login email address">✉</button> <button class="secondary" onclick="wachtwoordVervangen(${escapeHtml(JSON.stringify(l.id))}, ${escapeHtml(JSON.stringify(l.naam))})" title="Set a new temporary password">🔑</button> ` : ''}${l.vergrendeld ? '' : `<button class="secondary" style="color:#c9432f; border-color:#c9432f;" onclick="gebruikerVerwijderen(${escapeHtml(JSON.stringify(l.id))}, ${escapeHtml(JSON.stringify(l.naam))})">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="4">No members yet.</td></tr>';
+}
+
+async function emailWijzigen(id, huidig) {
+  const nieuw = prompt('New login email address for this account:\n(profile, roles and history stay linked)', huidig);
+  if (nieuw === null || nieuw.trim() === '' || nieuw.trim().toLowerCase() === huidig) return;
+  const res = await fetch('api_members.php?action=email_bijwerken', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, email: nieuw }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Change failed.'); return; }
+  alert('Email address changed to ' + data.email + '. You can now log in with this address.');
+  laadLeden();
+}
+
+async function wachtwoordVervangen(id, naam) {
+  if (!confirm(`Set a new temporary password for "${naam}"? The old password will stop working.`)) return;
+  const res = await fetch('api_members.php?action=wachtwoord_vervangen', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not set password.'); return; }
+  prompt(`New temporary password for ${naam} (${data.verstuurd ? 'also sent by email' : 'not emailed: pass it on yourself'}). Copy it now, it will not be shown again:`, data.wachtwoord);
 }
 
 async function gebruikerVerwijderen(id, naam) {

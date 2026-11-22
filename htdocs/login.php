@@ -59,7 +59,7 @@ if (!empty($_SESSION['user_id'])) {
     </div>
 
     <form id="loginForm" class="active">
-      <input type="text" id="loginEmail" placeholder="Email address (or 'dummy' for the demo account)" required autocomplete="username" />
+      <input type="text" id="loginEmail" placeholder="Email address<?= (defined('DEMO_ACCOUNT_ENABLED') && DEMO_ACCOUNT_ENABLED) ? " (or 'dummy' for the demo account)" : '' ?>" required autocomplete="username" />
       <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password" />
       <div class="error" id="loginError"></div>
       <button type="submit">Log in</button>

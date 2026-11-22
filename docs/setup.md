@@ -64,7 +64,7 @@ If your chosen backend isn't fully configured, or has a temporary outage, upload
 
 ## 8. Try the demo account
 
-Log in with username `dummy`, password `dummy` to see the portal from a "look but don't touch" perspective — every page is browsable, but no create/edit/delete/submit action will go through. Useful for showing your committee the portal before rolling it out, without risking test data ending up in your real records.
+The demo account is **off by default**. To enable it, add `define('DEMO_ACCOUNT_ENABLED', true);` to `district.php` (the commented-out line at the bottom of that file). Then log in with username `dummy`, password `dummy` to see the portal from a "look but don't touch" perspective — every page is browsable, but no create/edit/delete/submit action will go through. Useful for presenting the portal to your committee, without risking test data ending up in the real data. Switch it off again (comment the line out) once you're live with real data.
 
 ## 9. Backups
 

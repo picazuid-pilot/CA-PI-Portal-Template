@@ -2,6 +2,7 @@
 require __DIR__ . '/config.php';
 header('Content-Type: application/json; charset=utf-8');
 require_login();
+require_once __DIR__ . '/lib_opslag.php';
 
 $action = $_GET['action'] ?? '';
 
@@ -23,6 +24,34 @@ function target_path($id) {
 function idee_path($id) {
     $safe = preg_replace('/[^a-zA-Z0-9_\-]/', '', $id);
     return DATA_DIR . '/campagne_ideeen/' . $safe . '.json';
+}
+
+// ---- Attachments (materials) for ideas, campaigns and targets ---------------------
+// Files live in data/campagne_ideeen/materialen/ under a random name.
+// The browser only sends back {bestandsnaam, pad}; we never trust 'pad' blindly
+// (otherwise a forged path such as ../../users.json could make a delete
+// remove an arbitrary file).
+function materialen_dir() { return DATA_DIR . '/campagne_ideeen/materialen'; }
+function materialen_schoon($lijst) {
+    $uit = [];
+    foreach ((array)$lijst as $m) {
+        if (!is_array($m)) continue;
+        $pad = (string)($m['pad'] ?? '');
+        if (!preg_match('/^[a-f0-9]{64}\.[a-z0-9]{2,5}$/', $pad)) continue;
+        $naam = leden_schone_bestandsnaam($m['bestandsnaam'] ?? $pad);
+        $uit[] = ['bestandsnaam' => $naam, 'pad' => $pad];
+        if (count($uit) >= 20) break;
+    }
+    return $uit;
+}
+function materialen_verwijder($lijst, $behoud = []) {
+    $behoudPaden = array_column($behoud, 'pad');
+    foreach ((array)$lijst as $m) {
+        $pad = (string)($m['pad'] ?? '');
+        if (!preg_match('/^[a-f0-9]{64}\.[a-z0-9]{2,5}$/', $pad) || in_array($pad, $behoudPaden, true)) continue;
+        $vol = materialen_dir() . '/' . $pad;
+        if (is_file($vol)) @unlink($vol);
+    }
 }
 
 // Who may approve/carry out a campaign or idea of a given type: physical
@@ -434,6 +463,7 @@ switch ($action) {
             'goedgekeurdDoor' => null,
             'goedgekeurdOp' => null,
             'opmerkingVoorzitter' => '',
+            'materialen' => materialen_schoon($in['materialen'] ?? []),
             'createdAt' => time() * 1000,
             'createdBy' => current_user_slug(),
         ];
@@ -442,6 +472,31 @@ switch ($action) {
             ($_SESSION['user_name'] ?? current_user_slug()) . ' is proposing the campaign "' . $campagne['naam'] . '" (' . $campagne['kanaal'] . ').',
             'locations.php?tab=campagnes');
         respond(['campagne' => $campagne], 201);
+        break;
+    }
+
+    // Edit a campaign (e.g. add attachments): the creator, the coordinators, the Chairperson or IT.
+    case 'campaign_update': {
+        $id = $_GET['id'] ?? '';
+        $campagne = read_json(campagne_path($id), null);
+        if (!$campagne) respond(['error' => 'Campaign not found.'], 404);
+        $eigen = ($campagne['createdBy'] ?? '') === current_user_slug();
+        if (!$eigen && !heeft_rol(['admin', 'chair', 'media_coordinator', 'social_media_coordinator'])) respond(['error' => 'You are not permitted to do this.'], 403);
+        $in = json_input();
+        if (isset($in['naam'])) {
+            if (trim($in['naam']) === '') respond(['error' => 'The campaign name is required.'], 400);
+            $campagne['naam'] = trim($in['naam']);
+        }
+        if (isset($in['datum'])) $campagne['datum'] = $in['datum'];
+        if (isset($in['kanaal'])) $campagne['kanaal'] = mb_substr(trim($in['kanaal']), 0, 80);
+        if (isset($in['omschrijving'])) $campagne['omschrijving'] = $in['omschrijving'];
+        if (isset($in['materialen']) && is_array($in['materialen'])) {
+            $nieuweMat = materialen_schoon($in['materialen']);
+            materialen_verwijder($campagne['materialen'] ?? [], $nieuweMat);
+            $campagne['materialen'] = $nieuweMat;
+        }
+        write_json(campagne_path($id), $campagne);
+        respond(['campagne' => $campagne]);
         break;
     }
 
@@ -530,6 +585,7 @@ switch ($action) {
             'naam' => $naam,
             'type' => ($in['type'] ?? '') === 'online' ? 'online' : 'fysiek',
             'omschrijving' => trim($in['omschrijving'] ?? ''),
+            'materialen' => materialen_schoon($in['materialen'] ?? []),
             'createdBy' => $_SESSION['user_name'] ?? current_user_slug(),
             'createdAt' => time() * 1000,
         ];
@@ -550,6 +606,11 @@ switch ($action) {
         }
         if (isset($in['omschrijving'])) $target['omschrijving'] = trim($in['omschrijving']);
         if (isset($in['type'])) $target['type'] = $in['type'] === 'online' ? 'online' : 'fysiek';
+        if (isset($in['materialen']) && is_array($in['materialen'])) {
+            $nieuweMat = materialen_schoon($in['materialen']);
+            materialen_verwijder($target['materialen'] ?? [], $nieuweMat);
+            $target['materialen'] = $nieuweMat;
+        }
         write_json(target_path($id), $target);
         respond(['target' => $target]);
         break;
@@ -561,6 +622,7 @@ switch ($action) {
         if ($target) {
             $magVerwijderen = heeft_rol(['admin', 'chair']) || $target['createdBy'] === ($_SESSION['user_name'] ?? '');
             if (!$magVerwijderen) respond(['error' => 'You are not permitted to do this.'], 403);
+            materialen_verwijder($target['materialen'] ?? []);
         }
         if (file_exists(target_path($id))) unlink(target_path($id));
         respond(['deleted' => true]);
@@ -592,7 +654,7 @@ switch ($action) {
             'type' => $type, // fysiek | online — determines who carries it out
             'targetId' => trim($in['targetId'] ?? '') ?: null,
             'targetNaam' => trim($in['targetNaam'] ?? ''),
-            'materialen' => is_array($in['materialen'] ?? null) ? $in['materialen'] : [],
+            'materialen' => materialen_schoon($in['materialen'] ?? []),
             'deadline' => trim($in['deadline'] ?? '') ?: null,
             'benaderd' => !empty($in['benaderd']),
             'datumRegistratie' => date('Y-m-d'),
@@ -606,8 +668,8 @@ switch ($action) {
             'createdAt' => time() * 1000,
         ];
         write_json(idee_path($id), $idee);
-        notify_role($type === 'online' ? 'social_media_coordinator' : 'media_coordinator', 'New campaign idea — ' . $titel,
-            ($_SESSION['user_name'] ?? current_user_slug()) . ' has registered a campaign idea: ' . $titel,
+        notify_role($type === 'online' ? 'social_media_coordinator' : 'media_coordinator', 'New idea (Idea development) — ' . $titel,
+            ($_SESSION['user_name'] ?? current_user_slug()) . ' has registered an idea: ' . $titel,
             'locations.php?tab=campagne_ideeen');
         respond(['idee' => $idee], 201);
         break;
@@ -626,7 +688,11 @@ switch ($action) {
         if (isset($in['targetId'])) $idee['targetId'] = trim($in['targetId']) ?: null;
         if (isset($in['targetNaam'])) $idee['targetNaam'] = trim($in['targetNaam']);
         if (isset($in['type'])) $idee['type'] = $in['type'] === 'online' ? 'online' : 'fysiek';
-        if (isset($in['materialen']) && is_array($in['materialen'])) $idee['materialen'] = $in['materialen'];
+        if (isset($in['materialen']) && is_array($in['materialen'])) {
+            $nieuweMat = materialen_schoon($in['materialen']);
+            materialen_verwijder($idee['materialen'] ?? [], $nieuweMat); // also remove deleted attachments from disk
+            $idee['materialen'] = $nieuweMat;
+        }
         if (isset($in['deadline'])) $idee['deadline'] = trim($in['deadline']) ?: null;
         if (isset($in['benaderd'])) $idee['benaderd'] = !empty($in['benaderd']);
         if (isset($in['datumEersteContact'])) $idee['datumEersteContact'] = trim($in['datumEersteContact']) ?: null;
@@ -662,10 +728,7 @@ switch ($action) {
         if ($idee) {
             $magVerwijderen = heeft_rol(['admin', 'chair']) || $idee['createdBy'] === ($_SESSION['user_name'] ?? '');
             if (!$magVerwijderen) respond(['error' => 'Only the creator, the Chairperson, or IT can delete this.'], 403);
-            foreach ($idee['materialen'] as $m) {
-                $pad = DATA_DIR . '/campagne_ideeen/materialen/' . ($m['pad'] ?? '');
-                if (!empty($m['pad']) && file_exists($pad)) unlink($pad);
-            }
+            materialen_verwijder($idee['materialen'] ?? []);
         }
         if (file_exists(idee_path($id))) unlink(idee_path($id));
         respond(['deleted' => true]);
@@ -677,8 +740,9 @@ switch ($action) {
     case 'materiaal_upload': {
         if (empty($_FILES['bestand'])) respond(['error' => 'No file received.'], 400);
         $file = $_FILES['bestand'];
-        if ($file['error'] !== UPLOAD_ERR_OK) respond(['error' => 'Upload failed.'], 500);
+        if (is_array($file['name']) || $file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) respond(['error' => 'Upload failed.'], 400);
         if ($file['size'] > 15 * 1024 * 1024) respond(['error' => 'File must be no larger than 15 MB.'], 400);
+        if (!rate_limit_toegestaan('materiaalupload:' . ($_SESSION['user_id'] ?? ''), 40, 3600)) respond(['error' => 'Too many uploads; please try again later.'], 429);
 
         $toegestaan = [
             'application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp',
@@ -686,17 +750,22 @@ switch ($action) {
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
             'text/plain' => 'txt', 'message/rfc822' => 'eml',
         ];
-        $mime = mime_content_type($file['tmp_name']);
-        $ext = $toegestaan[$mime] ?? strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        // The file name's extension must be allowed (the MIME type alone is not enough).
+        $ext = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'doc', 'docx', 'txt', 'eml', 'msg'], true)) {
             respond(['error' => 'File type not supported.'], 400);
         }
+
+        // The content must match the type (a script named letter.pdf is rejected).
+        if ($ext === 'jpeg') $ext = 'jpg';
+        if (isset(leden_toegestane_typen()[$ext]) && !leden_inhoud_klopt($file['tmp_name'], $ext)) respond(['error' => 'The file content does not match its type (.' . $ext . ').'], 400);
+        rate_limit_registreer('materiaalupload:' . ($_SESSION['user_id'] ?? ''));
 
         $naam = veilige_token() . '.' . $ext;
         if (!move_uploaded_file($file['tmp_name'], DATA_DIR . '/campagne_ideeen/materialen/' . $naam)) {
             respond(['error' => 'Saving failed.'], 500);
         }
-        respond(['bestandsnaam' => $file['name'], 'pad' => $naam]);
+        respond(['bestandsnaam' => leden_schone_bestandsnaam($file['name']), 'pad' => $naam]);
         break;
     }
 
@@ -704,8 +773,10 @@ switch ($action) {
         $bestand = basename($_GET['bestand'] ?? '');
         $pad = DATA_DIR . '/campagne_ideeen/materialen/' . $bestand;
         if ($bestand === '' || !file_exists($pad)) { http_response_code(404); exit; }
+        if (!preg_match('/^[a-f0-9]{64}\.[a-z0-9]{2,5}$/', $bestand)) { http_response_code(404); exit; }
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: inline; filename="' . basename($_GET['naam'] ?? $bestand) . '"');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Disposition: attachment; filename="' . str_replace(['"', "\r", "\n"], '', preg_replace('/[^\x20-\x7E]/', '_', basename($_GET['naam'] ?? $bestand))) . '"');
         header('Content-Length: ' . filesize($pad));
         readfile($pad);
         exit;

@@ -14,7 +14,10 @@ switch ($action) {
         $name = trim($in['name'] ?? '');
         $invite = (string)($in['invite'] ?? '');
 
-        if ($invite !== INVITE_CODE) {
+        $ipSleutelRegistratie = 'v:' . sha1(klant_ip());
+        if (!rate_limit_toegestaan($ipSleutelRegistratie, 10, 900)) te_veel_pogingen();
+        if (!hash_equals((string)INVITE_CODE, $invite)) {
+            rate_limit_registreer($ipSleutelRegistratie);
             respond(['error' => 'Invite code is incorrect.'], 403);
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -29,7 +32,7 @@ switch ($action) {
 
         $users = read_json($usersPath, []);
         foreach ($users as $u) {
-            if ($u['email'] === $email) {
+            if ($u['email'] === $email || $u['id'] === $email) {
                 respond(['error' => 'This email address is already registered.'], 409);
             }
         }
@@ -53,6 +56,8 @@ switch ($action) {
         ];
         write_json($usersPath, $users);
 
+        session_regenerate_id(true); // against session fixation
+
         $_SESSION['user_id'] = $email;
         $_SESSION['user_name'] = $name;
         $_SESSION['user_roles'] = $rollen;
@@ -68,23 +73,31 @@ switch ($action) {
         // Fixed demo account — no registration needed, purely a session
         // that can VIEW everything but cannot CHANGE anything anywhere
         // (see the write-blocking rule in config.php).
-        if ($email === 'dummy' && $password === 'dummy') {
+        if ($email === 'dummy' && $password === 'dummy' && (defined('DEMO_ACCOUNT_ENABLED') && DEMO_ACCOUNT_ENABLED)) {
+            session_regenerate_id(true);
             $_SESSION['user_id'] = DEMO_ACCOUNT_ID;
             $_SESSION['user_name'] = 'Demo account (view only)';
             $_SESSION['user_roles'] = ['admin']; // sees everything, can save nothing
             respond(['id' => DEMO_ACCOUNT_ID, 'email' => 'dummy', 'name' => $_SESSION['user_name'], 'roles' => $_SESSION['user_roles']]);
         }
 
+        $emailSleutel = 'e:' . sha1($email);
+        $ipSleutel = 'i:' . sha1(klant_ip());
+        if (!rate_limit_toegestaan($emailSleutel, 8, 900) || !rate_limit_toegestaan($ipSleutel, 40, 900)) te_veel_pogingen();
         $users = read_json($usersPath, []);
         foreach ($users as $u) {
             if ($u['email'] === $email && password_verify($password, $u['passwordHash'])) {
                 $u = normaliseer_gebruiker_rollen($u);
+                session_regenerate_id(true); // against session fixation
+                rate_limit_wis($emailSleutel);
                 $_SESSION['user_id'] = $u['id'];
                 $_SESSION['user_name'] = $u['name'];
                 $_SESSION['user_roles'] = $u['roles'];
                 respond(['id' => $u['id'], 'email' => $u['email'], 'name' => $u['name'], 'roles' => $_SESSION['user_roles']]);
             }
         }
+        rate_limit_registreer($emailSleutel);
+        rate_limit_registreer($ipSleutel);
         respond(['error' => 'Email address or password is incorrect.'], 401);
         break;
     }
@@ -99,6 +112,12 @@ switch ($action) {
         // absence) is the real signal.
         $generiekAntwoord = ['ok' => true, 'melding' => 'If this email address is on file, you\'ll receive a link to reset your password within a few minutes.'];
 
+        $vSleutel = 'w:' . sha1($email);
+        $vIpSleutel = 'wi:' . sha1(klant_ip());
+        // Over the limit? Silently send nothing (same response, so an attacker learns nothing).
+        if (!rate_limit_toegestaan($vSleutel, 3, 3600) || !rate_limit_toegestaan($vIpSleutel, 15, 3600)) respond($generiekAntwoord);
+        rate_limit_registreer($vSleutel);
+        rate_limit_registreer($vIpSleutel);
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) respond($generiekAntwoord);
 
         $users = read_json($usersPath, []);
@@ -168,7 +187,7 @@ switch ($action) {
         if (empty($_SESSION['user_id'])) {
             respond(['user' => null]);
         }
-        $rollen = $_SESSION['user_roles'] ?? ['liaison'];
+        $rollen = current_user_roles();
         respond(['user' => [
             'id' => $_SESSION['user_id'],
             'name' => $_SESSION['user_name'] ?? '',

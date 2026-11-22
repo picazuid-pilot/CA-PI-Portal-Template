@@ -34,6 +34,7 @@ $eigenUserId = $_SESSION['user_id'];
       <button class="primary" onclick="openAanvraagForm()">+ Request outreach</button>
     </div>
     <div class="right" id="agenda-acties">
+      <button class="secondary" onclick="openAbonnement()">🔔 Subscribe to calendar</button>
       <?php if (heeft_rol(['admin'])): ?><button class="secondary" onclick="openInstellingenForm()">⚙️ Settings</button><?php endif; ?>
       <button class="primary" onclick="openAgendaForm()">+ Add agenda item</button>
     </div>
@@ -89,6 +90,36 @@ $eigenUserId = $_SESSION['user_id'];
     </div>
 
     <div id="agenda-lijst" style="display:none;"></div>
+  </div>
+
+  <!-- ===== Modal: subscribe to the calendar ===== -->
+  <div id="modal-abonnement" class="modal-backdrop" style="display:none;" onclick="if(event.target===this) sluitModal('modal-abonnement')">
+    <div class="modal" style="max-width:600px;">
+      <button class="modal-close" onclick="sluitModal('modal-abonnement')">✕</button>
+      <h2>Subscribe to the calendar</h2>
+      <p style="font-size:13.5px; color:var(--grey); margin-top:0;">
+        This makes all agenda items appear automatically in your own calendar app (read-only; changes made in the portal follow automatically, usually within a few hours).
+      </p>
+      <label>Your personal calendar link</label>
+      <div style="display:flex; gap:6px;">
+        <input id="abo-url" readonly onclick="this.select()" />
+        <button class="secondary" onclick="kopieerAbonnementLink()">Copy</button>
+      </div>
+      <div id="abo-status" style="font-size:12px; color:var(--grey); margin-top:4px; min-height:16px;"></div>
+      <p style="font-size:13px; margin:14px 0 4px;"><strong>Adding it in your calendar app:</strong></p>
+      <ul style="font-size:13px; margin:0; padding-left:18px; line-height:1.6;">
+        <li><strong>Thunderbird:</strong> Calendar → right-click in the calendar list → <em>New Calendar…</em> → <em>On the Network</em> → <em>iCalendar (ICS)</em> → paste the link.</li>
+        <li><strong>Google Calendar (desktop):</strong> <em>Other calendars</em> → <em>+</em> → <em>From URL</em> → paste the link. (Google refreshes on its own schedule, which can take up to a day.)</li>
+        <li><strong>iPhone/Mac:</strong> Settings → Calendar → Accounts → <em>Add Account</em> → <em>Other</em> → <em>Add Subscribed Calendar</em> → paste the link.</li>
+        <li><strong>Outlook:</strong> <em>Add calendar</em> → <em>Subscribe from web</em> → paste the link.</li>
+      </ul>
+      <p style="font-size:12px; color:var(--grey); margin:12px 0 0;">
+        Do not share this link: anyone who has it can read the calendar. If it has leaked, generate a new one; the old one stops working immediately.
+      </p>
+      <div style="margin-top:12px; text-align:right;">
+        <button class="secondary" style="color:#c9432f; border-color:#c9432f;" onclick="nieuweAbonnementLink()">Generate new link</button>
+      </div>
+    </div>
   </div>
 
   <!-- ===== Modal: day detail in calendar view ===== -->
@@ -265,7 +296,7 @@ $eigenUserId = $_SESSION['user_id'];
 
 <script>
 const isCoordinator = <?= $isCoordinator ? 'true' : 'false' ?>;
-const eigenUserId = <?= json_encode($eigenUserId) ?>;
+const eigenUserId = <?= json_encode($eigenUserId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 let aanvragenData = [];
 let huidigeDetailAanvraag = null;
 let tijdformaat24 = true;
@@ -354,7 +385,33 @@ function toonVoorlichtingSubView(v) {
   ['aankomend', 'aanvragen'].forEach(x => document.getElementById('subview-' + x).style.display = x === v ? '' : 'none');
 }
 function sluitModal(id) { document.getElementById(id).style.display = 'none'; }
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+// ---- Calendar subscription (iCal link) --------------------------------------
+
+async function haalAbonnementLink(nieuw) {
+  const res = await fetch('api_outreach.php?action=agenda_abonnement', {
+    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nieuw: !!nieuw }),
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not fetch the link.'); return false; }
+  document.getElementById('abo-url').value = data.url;
+  document.getElementById('abo-status').textContent = '';
+  return true;
+}
+async function openAbonnement() {
+  if (await haalAbonnementLink(false)) document.getElementById('modal-abonnement').style.display = 'flex';
+}
+async function nieuweAbonnementLink() {
+  if (!confirm('Generate a new link? The old link will stop working, and you will need to re-link your calendar app with the new one.')) return;
+  if (await haalAbonnementLink(true)) document.getElementById('abo-status').textContent = '✓ New link created.';
+}
+async function kopieerAbonnementLink() {
+  const input = document.getElementById('abo-url');
+  try { await navigator.clipboard.writeText(input.value); document.getElementById('abo-status').textContent = '✓ Copied.'; }
+  catch (e) { input.select(); document.getElementById('abo-status').textContent = 'Select the link and copy it with Ctrl+C.'; }
+}
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 function kopieerExterneLink() {
   const link = window.location.origin + window.location.pathname.replace(/outreach\.php$/, '') + 'external_request.php';
@@ -374,7 +431,7 @@ async function laadAanvragen() {
   const statusLabel = { open: 'open', ingepland: 'scheduled', afgewezen: 'declined' };
 
   document.getElementById('aanvragen-body').innerHTML = aanvragenData.map(a => `
-    <tr onclick='openDetail(${JSON.stringify(a.id)})'>
+    <tr onclick="openDetail(${escapeHtml(JSON.stringify(a.id))})">
       <td>${a.extern ? '<span class="badge grijs">external</span>' : ''}</td>
       <td>${escapeHtml(a.instellingNaam)}</td>
       <td>${escapeHtml(a.aanvragerNaam || (a.contactpersoon || '—'))}</td>
@@ -448,7 +505,7 @@ function renderAankomendeVoorlichtingen() {
 
   document.getElementById('aankomend-lijst').innerHTML = aankomend.map(a => `
     <div class="activity-item" style="display:flex; justify-content:space-between; align-items:center;">
-      <div style="cursor:pointer; flex:1;" onclick='toonVoorlichtingDetail(${JSON.stringify(a.id)})'>
+      <div style="cursor:pointer; flex:1;" onclick="toonVoorlichtingDetail(${escapeHtml(JSON.stringify(a.id))})">
         <div><strong>${escapeHtml(a.instellingNaam)}</strong></div>
         <div class="meta">${formatDatum(a.definitief.datum, { weekday: 'short', month: 'short' })}${a.definitief.tijd ? ' at ' + formatTijd(a.definitief.tijd) : ''} — ${a.definitief.leden.length} member(s) scheduled</div>
       </div>
@@ -770,7 +827,7 @@ function renderTodos() {
         ${afgerond ? `<div style="font-size:11px; color:var(--grey); margin-top:2px;">Completed by ${escapeHtml(t.afgerondDoor)}</div>` : ''}
       </div>
       <div style="flex:0 0 auto; white-space:nowrap;">
-        <button class="secondary" onclick='openTodoForm(${JSON.stringify(t)})'>✎</button>
+        <button class="secondary" onclick="openTodoForm(${escapeHtml(JSON.stringify(t))})">✎</button>
         <button class="secondary" onclick="todoVerwijderen('${t.id}')">✕</button>
       </div>
     </div>`;
@@ -881,7 +938,7 @@ function renderAgendaLijst() {
         ${betrokkenen.length ? `<span style="font-size:12px; color:var(--grey);">With: ${betrokkenen.map(b => escapeHtml(b.naam || b)).join(', ')}</span>` : ''}
       </div>
       <div style="white-space:nowrap;">
-        ${!item.voorlichtingId ? `<button class="secondary" onclick='openAgendaForm(${JSON.stringify(item)})'>Edit</button> ` : ''}
+        ${!item.voorlichtingId ? `<button class="secondary" onclick="openAgendaForm(${escapeHtml(JSON.stringify(item))})">Edit</button> ` : ''}
         <button class="secondary" onclick="agendaVerwijderen('${item.id}')">✕</button>
       </div>
     </div>`;

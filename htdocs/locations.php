@@ -26,7 +26,7 @@ if (empty($_SESSION['user_id'])) {
       <button class="secondary" data-view="bulk" onclick="toonView('bulk')">Bulk import</button>
       <button class="secondary" data-view="campagnes" onclick="toonView('campagnes')">Campaigns</button>
       <button class="secondary" data-view="targets" onclick="toonView('targets')">Targets</button>
-      <button class="secondary" data-view="campagne_ideeen" onclick="toonView('campagne_ideeen')">Campaign ideas</button>
+      <button class="secondary" data-view="campagne_ideeen" onclick="toonView('campagne_ideeen')">Idea development</button>
     </div>
     <div class="right">
       <input id="zoek" placeholder="Search by name or city…" style="width:220px;" oninput="renderLijst()" />
@@ -139,34 +139,39 @@ if (empty($_SESSION['user_id'])) {
       <h2 id="target-titel-kop">Add target</h2>
       <label>Name</label><input id="tg-naam" />
       <label>Description</label><textarea id="tg-omschrijving" rows="3"></textarea>
+      <label>Attachments</label>
+      <input type="file" id="tg-bijlage-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.txt,.eml,.msg" style="display:none;" onchange="bijlageUploaden('tg')" />
+      <button type="button" class="secondary" onclick="document.getElementById('tg-bijlage-input').click()">+ Add attachment</button>
+      <div id="tg-bijlage-status" style="font-size:12px; color:var(--grey); margin-top:4px;"></div>
+      <div id="tg-bijlage-lijst" style="margin-top:6px;"></div>
       <div style="margin-top:14px; text-align:right;">
         <button class="primary" onclick="targetOpslaan()">Save</button>
       </div>
     </div>
   </div>
 
-  <!-- ===== Campaign ideas ===== -->
+  <!-- ===== Idea development ===== -->
   <div id="view-campagne_ideeen" class="card" style="display:none;">
     <div class="toolbar" style="margin-bottom:0;">
-      <strong>Campaign ideas — Physical</strong>
+      <strong>Idea development — Physical</strong>
       <button class="primary" onclick="openIdeeForm('fysiek')">+ Submit idea (physical)</button>
     </div>
     <p style="color:var(--grey); font-size:12px; margin:4px 0 10px;">Carried out by the Media Coordinator.</p>
     <div id="ideeen-lijst-fysiek"></div>
 
     <div class="toolbar" style="margin-top:26px; margin-bottom:0;">
-      <strong>Campaign ideas — Online</strong>
+      <strong>Idea development — Online</strong>
       <button class="primary" onclick="openIdeeForm('online')">+ Submit idea (online)</button>
     </div>
     <p style="color:var(--grey); font-size:12px; margin:4px 0 10px;">Carried out by the Social Media Coordinator.</p>
     <div id="ideeen-lijst-online"></div>
   </div>
 
-  <!-- ===== Modal: submit/edit campaign idea ===== -->
+  <!-- ===== Modal: submit/edit idea ===== -->
   <div id="modal-idee" class="modal-backdrop" style="display:none;" onclick="if(event.target===this) sluitModal('modal-idee')">
     <div class="modal" style="max-width:640px;">
       <button class="modal-close" onclick="sluitModal('modal-idee')">✕</button>
-      <h2 id="idee-titel-kop">Submit campaign idea</h2>
+      <h2 id="idee-titel-kop">Submit idea</h2>
 
       <label>Plan (e.g. "Submit an ad and/or article to the local newspaper")</label>
       <input id="id-titel" />
@@ -301,13 +306,18 @@ if (empty($_SESSION['user_id'])) {
 <div id="modal-campagne" class="modal-backdrop" style="display:none;" onclick="if(event.target===this) sluitModal('modal-campagne')">
   <div class="modal">
     <button class="modal-close" onclick="sluitModal('modal-campagne')">✕</button>
-    <h2>New campaign</h2>
+    <h2 id="c-kop">New campaign</h2>
     <label>Name</label><input id="c-naam" />
     <label>Date</label><input id="c-datum" type="date" />
     <label>Channel</label><input id="c-kanaal" value="Laposta" />
     <label>Description</label><textarea id="c-omschrijving" rows="2"></textarea>
+    <label>Attachments</label>
+    <input type="file" id="c-bijlage-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.txt,.eml,.msg" style="display:none;" onchange="bijlageUploaden('c')" />
+    <button type="button" class="secondary" onclick="document.getElementById('c-bijlage-input').click()">+ Add attachment</button>
+    <div id="c-bijlage-status" style="font-size:12px; color:var(--grey); margin-top:4px;"></div>
+    <div id="c-bijlage-lijst" style="margin-top:6px;"></div>
     <div style="margin-top:14px; text-align:right;">
-      <button class="primary" onclick="opslaanCampagne()">Create</button>
+      <button class="primary" id="c-opslaan" onclick="opslaanCampagne()">Create</button>
     </div>
   </div>
 </div>
@@ -367,7 +377,7 @@ function renderLijst() {
   document.getElementById('lijst-body').innerHTML = rows || '<tr><td colspan="6">No locations found.</td></tr>';
 }
 
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 let datumformaatVolgorde = 'dmy'; // 'dmy' | 'mdy' | 'ymd' — loaded via laadInstellingenLocations()
 function formatDatum(iso) {
@@ -624,6 +634,42 @@ async function importeerRijen() {
   laadLocaties();
 }
 
+// ---- Attachments widget (campaigns and targets; ideas have their own, same endpoint) ----------
+const bijlagen = { c: [], tg: [] };
+function bijlagenHtml(lijst) {
+  if (!lijst || !lijst.length) return '';
+  return '<div style="font-size:12px; margin-top:3px;">' + lijst.map(m => `📎 <a href="api_locations.php?action=materiaal_stream&bestand=${encodeURIComponent(m.pad)}&naam=${encodeURIComponent(m.bestandsnaam)}">${escapeHtml(m.bestandsnaam)}</a>`).join(' &nbsp; ') + '</div>';
+}
+function bijlageStart(p, lijst) {
+  bijlagen[p] = [...(lijst || [])];
+  document.getElementById(p + '-bijlage-status').textContent = '';
+  document.getElementById(p + '-bijlage-input').value = '';
+  bijlageRender(p);
+}
+function bijlageRender(p) {
+  document.getElementById(p + '-bijlage-lijst').innerHTML = bijlagen[p].map((m, i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:12.5px;">
+      <span>📎 ${escapeHtml(m.bestandsnaam)}</span>
+      <button type="button" class="secondary" style="padding:1px 8px;" onclick="bijlagen['${p}'].splice(${i},1); bijlageRender('${p}');">✕</button>
+    </div>`).join('');
+}
+async function bijlageUploaden(p) {
+  const inputEl = document.getElementById(p + '-bijlage-input');
+  if (!inputEl.files.length) return;
+  const statusEl = document.getElementById(p + '-bijlage-status');
+  statusEl.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('bestand', inputEl.files[0]);
+  let res, data = {};
+  try { res = await fetch('api_locations.php?action=materiaal_upload', { method: 'POST', credentials: 'same-origin', body: fd }); data = await res.json(); }
+  catch (e) { statusEl.textContent = 'Upload failed (connection problem or file too large).'; inputEl.value = ''; return; }
+  inputEl.value = '';
+  if (!res.ok) { statusEl.textContent = data.error || 'Upload failed.'; return; }
+  statusEl.textContent = '✓ added: ' + data.bestandsnaam;
+  bijlagen[p].push(data);
+  bijlageRender(p);
+}
+
 // ---- Campaigns ----------------------------------------------------
 
 async function laadCampagnes() {
@@ -634,9 +680,10 @@ async function laadCampagnes() {
 
   const renderRij = (c, magGoedkeuren) => `
     <tr>
-      <td>${escapeHtml(c.naam)}</td><td>${formatDatum(c.datum)}</td><td>${escapeHtml(c.kanaal)}</td><td>${c.deelnemers.length}</td>
+      <td>${escapeHtml(c.naam)}${bijlagenHtml(c.materialen)}</td><td>${formatDatum(c.datum)}</td><td>${escapeHtml(c.kanaal)}</td><td>${c.deelnemers.length}</td>
       <td>
         <span class="badge ${statusBadge[c.status] || 'grijs'}">${statusLabel[c.status] || c.status}</span>
+        <button class="secondary" onclick="openNieuweCampagne(${escapeHtml(JSON.stringify(c.type || 'fysiek'))}, ${escapeHtml(JSON.stringify(c))})" title="Edit / add attachments">✎</button>
         ${c.status === 'wacht_op_goedkeuring' && magGoedkeuren ? `
           <button class="secondary" onclick="campagneGoedkeuren('${c.id}')">✓ Approve</button>
           <button class="secondary" onclick="campagneAfwijzenOpenen('${c.id}')">✕ Reject</button>
@@ -669,19 +716,26 @@ async function campagneAfwijzenBevestigen() {
 }
 
 let huidigCampagneType = 'fysiek';
-function openNieuweCampagne(type) {
+let huidigBewerkCampagneId = null;
+function openNieuweCampagne(type, bestaand) {
   huidigCampagneType = type;
-  document.getElementById('c-naam').value = '';
-  document.getElementById('c-datum').value = new Date().toISOString().slice(0, 10);
-  document.getElementById('c-kanaal').value = type === 'online' ? 'Social media' : 'Laposta';
-  document.getElementById('c-omschrijving').value = '';
+  huidigBewerkCampagneId = bestaand ? bestaand.id : null;
+  document.getElementById('c-kop').textContent = bestaand ? 'Edit campaign' : 'New campaign';
+  document.getElementById('c-opslaan').textContent = bestaand ? 'Save' : 'Create';
+  document.getElementById('c-naam').value = bestaand ? bestaand.naam : '';
+  document.getElementById('c-datum').value = bestaand ? (bestaand.datum || '') : new Date().toISOString().slice(0, 10);
+  document.getElementById('c-kanaal').value = bestaand ? (bestaand.kanaal || '') : (type === 'online' ? 'Social media' : 'Laposta');
+  document.getElementById('c-omschrijving').value = bestaand ? (bestaand.omschrijving || '') : '';
+  bijlageStart('c', bestaand ? bestaand.materialen : []);
   document.getElementById('modal-campagne').style.display = 'flex';
 }
 
 async function opslaanCampagne() {
-  const body = { naam: document.getElementById('c-naam').value, datum: document.getElementById('c-datum').value, kanaal: document.getElementById('c-kanaal').value, omschrijving: document.getElementById('c-omschrijving').value, type: huidigCampagneType };
+  const body = { naam: document.getElementById('c-naam').value, datum: document.getElementById('c-datum').value, kanaal: document.getElementById('c-kanaal').value, omschrijving: document.getElementById('c-omschrijving').value, type: huidigCampagneType, materialen: bijlagen.c };
   if (!body.naam.trim()) { alert('Name is required.'); return; }
-  await fetch('api_locations.php?action=campaign_create', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const url = huidigBewerkCampagneId ? 'api_locations.php?action=campaign_update&id=' + encodeURIComponent(huidigBewerkCampagneId) : 'api_locations.php?action=campaign_create';
+  const res = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { const d = await res.json(); alert(d.error || 'Save failed.'); return; }
   sluitModal('modal-campagne');
   laadCampagnes();
 }
@@ -698,10 +752,10 @@ async function laadTargets() {
   targetsData = data.targets;
   const renderRij = (t) => `
     <tr>
-      <td>${escapeHtml(t.naam)}</td>
+      <td>${escapeHtml(t.naam)}${bijlagenHtml(t.materialen)}</td>
       <td>${escapeHtml(t.omschrijving || '—')}</td>
       <td style="white-space:nowrap;">
-        <button class="secondary" onclick='openTargetForm(${JSON.stringify(t.type || 'fysiek')}, ${JSON.stringify(t)})'>✎</button>
+        <button class="secondary" onclick="openTargetForm(${escapeHtml(JSON.stringify(t.type || 'fysiek'))}, ${escapeHtml(JSON.stringify(t))})">✎</button>
         <button class="secondary" onclick="targetVerwijderen('${t.id}')">✕</button>
       </td>
     </tr>`;
@@ -717,11 +771,12 @@ function openTargetForm(type, bestaand) {
   document.getElementById('target-titel-kop').textContent = bestaand ? 'Edit target' : 'Add target (' + (type === 'online' ? 'online' : 'physical') + ')';
   document.getElementById('tg-naam').value = bestaand ? bestaand.naam : '';
   document.getElementById('tg-omschrijving').value = bestaand ? (bestaand.omschrijving || '') : '';
+  bijlageStart('tg', bestaand ? bestaand.materialen : []);
   document.getElementById('modal-target').style.display = 'flex';
 }
 
 async function targetOpslaan() {
-  const body = { naam: document.getElementById('tg-naam').value, omschrijving: document.getElementById('tg-omschrijving').value, type: huidigTargetType };
+  const body = { naam: document.getElementById('tg-naam').value, omschrijving: document.getElementById('tg-omschrijving').value, type: huidigTargetType, materialen: bijlagen.tg };
   if (!body.naam.trim()) { alert('Name is required.'); return; }
   const url = huidigBewerkTargetId
     ? 'api_locations.php?action=target_update&id=' + encodeURIComponent(huidigBewerkTargetId)
@@ -739,7 +794,7 @@ async function targetVerwijderen(id) {
   laadTargets();
 }
 
-// ---- Campaign ideas ----------------------------------------------------
+// ---- Idea development ----------------------------------------------------
 
 let ideeenData = [];
 let huidigBewerkIdeeId = null;
@@ -783,15 +838,15 @@ function renderIdeeen() {
         </div>
         <div style="white-space:nowrap;">
           ${magAfronden ? `<button class="secondary" onclick="ideeStatusWijzigen('${idee.id}', '${idee.status === 'afgerond' ? 'open' : 'afgerond'}')">${idee.status === 'afgerond' ? '↺ Reopen' : '✓ Mark done'}</button>` : ''}
-          <button class="secondary" onclick='openIdeeForm(${JSON.stringify(idee.type || 'fysiek')}, ${JSON.stringify(idee)})'>✎</button>
+          <button class="secondary" onclick="openIdeeForm(${escapeHtml(JSON.stringify(idee.type || 'fysiek'))}, ${escapeHtml(JSON.stringify(idee))})">✎</button>
           <button class="secondary" onclick="ideeVerwijderen('${idee.id}')">✕</button>
         </div>
       </div>
     </div>`;
   };
 
-  document.getElementById('ideeen-lijst-fysiek').innerHTML = ideeenData.filter(i => (i.type || 'fysiek') === 'fysiek').map(i => maakKaart(i, magFysiekGoedkeuren)).join('') || '<p style="color:var(--grey);">No campaign ideas submitted yet.</p>';
-  document.getElementById('ideeen-lijst-online').innerHTML = ideeenData.filter(i => i.type === 'online').map(i => maakKaart(i, magOnlineGoedkeuren)).join('') || '<p style="color:var(--grey);">No campaign ideas submitted yet.</p>';
+  document.getElementById('ideeen-lijst-fysiek').innerHTML = ideeenData.filter(i => (i.type || 'fysiek') === 'fysiek').map(i => maakKaart(i, magFysiekGoedkeuren)).join('') || '<p style="color:var(--grey);">No ideas submitted yet.</p>';
+  document.getElementById('ideeen-lijst-online').innerHTML = ideeenData.filter(i => i.type === 'online').map(i => maakKaart(i, magOnlineGoedkeuren)).join('') || '<p style="color:var(--grey);">No ideas submitted yet.</p>';
 }
 
 async function ideeStatusWijzigen(id, status) {
@@ -806,7 +861,7 @@ let huidigIdeeType = 'fysiek';
 async function openIdeeForm(type, bestaand) {
   huidigIdeeType = bestaand ? (bestaand.type || 'fysiek') : type;
   huidigBewerkIdeeId = bestaand ? bestaand.id : null;
-  document.getElementById('idee-titel-kop').textContent = bestaand ? 'Edit campaign idea' : 'Submit campaign idea (' + (huidigIdeeType === 'online' ? 'online' : 'physical') + ')';
+  document.getElementById('idee-titel-kop').textContent = bestaand ? 'Edit idea' : 'Submit idea (' + (huidigIdeeType === 'online' ? 'online' : 'physical') + ')';
   document.getElementById('id-titel').value = bestaand ? bestaand.titel : '';
   document.getElementById('id-deadline').value = bestaand ? (bestaand.deadline || '') : '';
   document.getElementById('id-eerstecontact').value = bestaand ? (bestaand.datumEersteContact || '') : '';
@@ -903,7 +958,7 @@ async function ideeOpslaan() {
 }
 
 async function ideeVerwijderen(id) {
-  if (!confirm('Completely delete this campaign idea? Any uploaded materials will also be removed.')) return;
+  if (!confirm('Completely delete this idea? Any uploaded materials will also be removed.')) return;
   const res = await fetch('api_locations.php?action=idee_delete&id=' + encodeURIComponent(id), { method: 'POST', credentials: 'same-origin' });
   if (!res.ok) { const d = await res.json(); alert(d.error || 'Deletion failed.'); return; }
   laadIdeeen();

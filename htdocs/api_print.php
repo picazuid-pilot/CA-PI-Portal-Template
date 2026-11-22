@@ -14,6 +14,18 @@ if (!in_array($action, $publiekeActies, true)) {
 $coordinatorRollen = ['admin', 'coordinator_distribution'];
 
 function voorraad_path() { return DATA_DIR . '/drukwerk/voorraad.json'; }
+function voorraad_subcats_path() { return DATA_DIR . '/drukwerk/voorraad_subcats.json'; }
+function voorraad_subcats() {
+    $l = read_json(voorraad_subcats_path(), []);
+    usort($l, fn($a, $b) => ($a['volgorde'] ?? 0) <=> ($b['volgorde'] ?? 0));
+    return $l;
+}
+function voorraad_subcat_geldig($id) {
+    if (!$id) return null;
+    foreach (voorraad_subcats() as $c) { if ($c['id'] === $id) return $id; }
+    return null;
+}
+function voorraad_subcat_naam_schoon($naam) { return mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags((string)$naam))), 0, 60); }
 function voorraad_mutaties_path() { return DATA_DIR . '/drukwerk/voorraad_mutaties.json'; }
 function leveranciers_path() { return DATA_DIR . '/drukwerk/leveranciers.json'; }
 function pakketten_path() { return DATA_DIR . '/drukwerk/pakketten.json'; }
@@ -71,7 +83,79 @@ switch ($action) {
     // ================= STOCK =================
 
     case 'voorraad_list': {
-        respond(['voorraad' => read_json(voorraad_path(), [])]);
+        respond(['voorraad' => read_json(voorraad_path(), []), 'subcategorieen' => voorraad_subcats()]);
+        break;
+    }
+
+    // ---- Stock subcategories (like the Drive database): managed by the Print Coordinator and IT ----
+
+    case 'voorraad_subcat_create': {
+        require_role($coordinatorRollen);
+        $naam = voorraad_subcat_naam_schoon(json_input()['naam'] ?? '');
+        if ($naam === '') respond(['error' => 'Give the subcategory a name.'], 400);
+        $lijst = read_json(voorraad_subcats_path(), []);
+        foreach ($lijst as $c) { if (mb_strtolower($c['naam']) === mb_strtolower($naam)) respond(['error' => 'A subcategory with this name already exists.'], 409); }
+        $volgorde = 0; foreach ($lijst as $c) $volgorde = max($volgorde, (int)($c['volgorde'] ?? 0) + 1);
+        $lijst[] = ['id' => uuid(), 'naam' => $naam, 'volgorde' => $volgorde, 'createdAt' => time() * 1000];
+        write_json(voorraad_subcats_path(), $lijst);
+        respond(['subcategorieen' => voorraad_subcats()], 201);
+        break;
+    }
+
+    case 'voorraad_subcat_update': {
+        require_role($coordinatorRollen);
+        $id = $_GET['id'] ?? '';
+        $naam = voorraad_subcat_naam_schoon(json_input()['naam'] ?? '');
+        if ($naam === '') respond(['error' => 'Give the subcategory a name.'], 400);
+        $lijst = read_json(voorraad_subcats_path(), []);
+        $gevonden = false;
+        foreach ($lijst as $c) { if ($c['id'] !== $id && mb_strtolower($c['naam']) === mb_strtolower($naam)) respond(['error' => 'A subcategory with this name already exists.'], 409); }
+        foreach ($lijst as &$c) { if ($c['id'] === $id) { $c['naam'] = $naam; $gevonden = true; } }
+        unset($c);
+        if (!$gevonden) respond(['error' => 'Subcategory not found.'], 404);
+        write_json(voorraad_subcats_path(), $lijst);
+        respond(['subcategorieen' => voorraad_subcats()]);
+        break;
+    }
+
+    // Deleting: the items themselves remain and move to "Unsorted".
+    case 'voorraad_subcat_delete': {
+        require_role($coordinatorRollen);
+        $id = $_GET['id'] ?? '';
+        write_json(voorraad_subcats_path(), array_values(array_filter(read_json(voorraad_subcats_path(), []), fn($c) => $c['id'] !== $id)));
+        $lijst = read_json(voorraad_path(), []);
+        foreach ($lijst as &$i) { if (($i['subcategorieId'] ?? null) === $id) $i['subcategorieId'] = null; }
+        unset($i);
+        write_json(voorraad_path(), $lijst);
+        respond(['subcategorieen' => voorraad_subcats()]);
+        break;
+    }
+
+    case 'voorraad_subcats_herordenen': {
+        require_role($coordinatorRollen);
+        $volgorde = json_input()['volgorde'] ?? [];
+        if (!is_array($volgorde)) respond(['error' => 'Invalid order.'], 400);
+        $lijst = read_json(voorraad_subcats_path(), []);
+        foreach ($lijst as &$c) { $pos = array_search($c['id'], $volgorde, true); if ($pos !== false) $c['volgorde'] = $pos; }
+        unset($c);
+        write_json(voorraad_subcats_path(), $lijst);
+        respond(['subcategorieen' => voorraad_subcats()]);
+        break;
+    }
+
+    // Drag an item into a subcategory (null = Unsorted).
+    case 'voorraad_item_verplaatsen': {
+        require_role($coordinatorRollen);
+        $in = json_input();
+        $id = $in['id'] ?? '';
+        $doel = voorraad_subcat_geldig($in['subcategorieId'] ?? null);
+        $lijst = read_json(voorraad_path(), []);
+        $gevonden = false;
+        foreach ($lijst as &$i) { if ($i['id'] === $id) { $i['subcategorieId'] = $doel; $gevonden = true; } }
+        unset($i);
+        if (!$gevonden) respond(['error' => 'Item not found.'], 404);
+        write_json(voorraad_path(), $lijst);
+        respond(['voorraad' => $lijst]);
         break;
     }
 
@@ -99,6 +183,7 @@ switch ($action) {
             'gewicht' => $in['gewicht'] !== '' && $in['gewicht'] !== null ? (float)$in['gewicht'] : null,
             'gewichtPerAantal' => max(1, (int)($in['gewichtPerAantal'] ?? 1)),
             'notitie' => $in['notitie'] ?? '',
+            'subcategorieId' => array_key_exists('subcategorieId', $in) ? voorraad_subcat_geldig($in['subcategorieId']) : ($bestaand['subcategorieId'] ?? null),
             // The preview image stays as-is when editing other fields —
             // only changed via 'voorraad_thumbnail_upload'.
             'voorbeeldType' => $bestaand['voorbeeldType'] ?? 'geen',
@@ -302,6 +387,9 @@ switch ($action) {
 
     case 'aanvraag_extern_create': {
         $in = json_input();
+        $extSleutel = 'x:' . sha1(klant_ip());
+        if (!rate_limit_toegestaan($extSleutel, 8, 3600)) respond(['error' => 'Too many requests were sent from this address. Please try again later.'], 429);
+        rate_limit_registreer($extSleutel);
 
         // Honeypot: hidden field a human never fills in, bots often do. If
         // they fill it in anyway, we pretend it succeeded (so the bot
@@ -655,7 +743,7 @@ switch ($action) {
             'leverancier' => trim($in['leverancier']),
             'product' => trim($in['product']),
             'aantalVarianten' => max(1, (int)($in['aantalVarianten'] ?? 1)),
-            'link' => $in['link'] ?? '',
+            'link' => veilige_url($in['link'] ?? ''),
             'notitie' => $in['notitie'] ?? '',
             'prijzen' => $prijzen,
             'updatedAt' => time() * 1000,
@@ -696,7 +784,7 @@ switch ($action) {
                 'leverancier' => trim($rij['leverancier']),
                 'product' => trim($rij['product']),
                 'aantalVarianten' => max(1, (int)($rij['aantalVarianten'] ?? 1)),
-                'link' => $rij['link'] ?? '',
+                'link' => veilige_url($rij['link'] ?? ''),
                 'notitie' => $rij['notitie'] ?? '',
                 'prijzen' => $prijzen,
                 'updatedAt' => time() * 1000,

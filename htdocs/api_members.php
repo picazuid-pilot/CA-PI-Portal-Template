@@ -6,6 +6,13 @@ require_login(); // whole file requires at least being logged in; refined per ac
 $action = $_GET['action'] ?? '';
 $usersPath = DATA_DIR . '/users.json';
 
+// Member management (registering members, assigning roles, deleting accounts) is for IT and the chairperson.
+// The IT role stays with IT: a chairperson cannot grant 'admin' nor change or delete an IT account
+// (otherwise the chairperson could give themselves IT rights).
+$ledenbeheerRollen = ['admin', 'chair'];
+function is_it_gebruiker($u) { return in_array('admin', normaliseer_gebruiker_rollen($u)['roles'], true); }
+function alleen_it_melding() { respond(['error' => 'Only a permanent IT administrator can grant the IT role, change or delete an IT account, or replace email addresses and passwords.'], 403); }
+
 switch ($action) {
 
     case 'kleuren_list': {
@@ -53,7 +60,7 @@ switch ($action) {
     }
 
     case 'gebruiker_aanmaken': {
-        require_role(['admin']);
+        require_role($ledenbeheerRollen);
         $in = json_input();
         $email = strtolower(trim($in['email'] ?? ''));
         $naam = trim($in['naam'] ?? '');
@@ -69,11 +76,12 @@ switch ($action) {
 
         $users = read_json($usersPath, []);
         foreach ($users as $u) {
-            if ($u['email'] === $email) respond(['error' => 'This email address is already registered.'], 409);
+            if ($u['email'] === $email || $u['id'] === $email) respond(['error' => 'This email address is already registered.'], 409);
         }
 
         $rollen = is_array($in['roles'] ?? null) ? array_values(array_intersect($in['roles'], array_keys(ROLES))) : [];
         if (empty($rollen)) $rollen = ['liaison'];
+        if (in_array('admin', $rollen, true) && !heeft_vaste_it()) alleen_it_melding();
 
         $users[] = [
             'id' => $email,
@@ -103,9 +111,10 @@ switch ($action) {
     }
 
     case 'leden_list': {
-        require_role(['admin']);
+        require_role($ledenbeheerRollen);
+        $isIT = heeft_vaste_it();
         $users = read_json($usersPath, []);
-        $lijst = array_map(function ($u) {
+        $lijst = array_map(function ($u) use ($isIT) {
             $u = normaliseer_gebruiker_rollen($u);
             return [
                 'id' => $u['id'],
@@ -113,10 +122,14 @@ switch ($action) {
                 'email' => $u['email'] ?? $u['id'],
                 'roles' => $u['roles'],
                 'createdAt' => $u['createdAt'] ?? null,
+                // For a chairperson, IT accounts are read-only.
+                'vergrendeld' => !$isIT && is_it_gebruiker($u),
             ];
         }, $users);
         usort($lijst, fn($a, $b) => strcmp($a['naam'], $b['naam']));
-        respond(['leden' => $lijst, 'rollen' => ROLES]);
+        $rollenUit = ROLES;
+        if (!$isIT) unset($rollenUit['admin']); // the chairperson cannot pick the IT role
+        respond(['leden' => $lijst, 'rollen' => $rollenUit]);
         break;
     }
 
@@ -124,7 +137,7 @@ switch ($action) {
     // usable by the Secretary, who doesn't have access to the full Member
     // Management screen (roles/colours) but may manage profiles.
     case 'leden_lijst_kiezer': {
-        require_role(['admin', 'secretary']);
+        require_role(['admin', 'chair', 'secretary']);
         $users = read_json($usersPath, []);
         $lijst = array_map(fn($u) => ['id' => $u['id'], 'naam' => $u['name'] ?? $u['id']], $users);
         usort($lijst, fn($a, $b) => strcmp($a['naam'], $b['naam']));
@@ -159,7 +172,7 @@ switch ($action) {
         // Viewing is allowed for any logged-in member (small, close-knit
         // team) — only EDITING is restricted to the member themselves,
         // the Secretary, and IT.
-        $magBewerken = $isEigen || heeft_rol(['admin', 'secretary']);
+        $magBewerken = $isEigen || heeft_rol(['admin', 'chair', 'secretary']);
 
         $users = read_json($usersPath, []);
         foreach ($users as $u) {
@@ -184,7 +197,7 @@ switch ($action) {
     case 'profiel_bijwerken': {
         $id = $_GET['id'] ?? $_SESSION['user_id'];
         $isEigen = $id === $_SESSION['user_id'];
-        if (!$isEigen && !heeft_rol(['admin', 'secretary'])) respond(['error' => 'You are not permitted to do this.'], 403);
+        if (!$isEigen && !heeft_rol(['admin', 'chair', 'secretary'])) respond(['error' => 'You are not permitted to do this.'], 403);
 
         $in = json_input();
         $users = read_json($usersPath, []);
@@ -212,7 +225,7 @@ switch ($action) {
     case 'profielfoto_upload': {
         $id = $_GET['id'] ?? $_SESSION['user_id'];
         $isEigen = $id === $_SESSION['user_id'];
-        if (!$isEigen && !heeft_rol(['admin', 'secretary'])) respond(['error' => 'You are not permitted to do this.'], 403);
+        if (!$isEigen && !heeft_rol(['admin', 'chair', 'secretary'])) respond(['error' => 'You are not permitted to do this.'], 403);
         if (empty($_FILES['bestand'])) respond(['error' => 'No file received.'], 400);
         $file = $_FILES['bestand'];
         if ($file['error'] !== UPLOAD_ERR_OK) respond(['error' => 'Upload failed.'], 500);
@@ -261,8 +274,62 @@ switch ($action) {
         exit;
     }
 
-    case 'gebruiker_verwijderen': {
+    // IT: change the email address (login address) of an account. The internal account ID
+    // stays unchanged, so profile, roles, requests and notifications remain linked.
+    // Logging in and sending mail use the 'email' field.
+    case 'email_bijwerken': {
         require_role(['admin']);
+        if (!heeft_vaste_it()) alleen_it_melding(); // not with temporary IT rights
+        $in = json_input();
+        $id = trim($in['id'] ?? '');
+        $nieuw = strtolower(trim($in['email'] ?? ''));
+        if ($id === '' || $id === DEMO_ACCOUNT_ID) respond(['error' => 'Unknown member.'], 400);
+        if (!filter_var($nieuw, FILTER_VALIDATE_EMAIL)) respond(['error' => 'Enter a valid email address.'], 400);
+        $users = read_json($usersPath, []);
+        foreach ($users as $u) {
+            if ($u['id'] !== $id && ($u['email'] === $nieuw || $u['id'] === $nieuw)) respond(['error' => 'This email address is already used by another account.'], 409);
+        }
+        $gevonden = false; $oud = '';
+        foreach ($users as &$u) {
+            if ($u['id'] === $id) { $oud = $u['email'] ?? $id; $u['email'] = $nieuw; $gevonden = true; break; }
+        }
+        unset($u);
+        if (!$gevonden) respond(['error' => 'Member not found.'], 404);
+        write_json($usersPath, $users);
+        respond(['ok' => true, 'oud' => $oud, 'email' => $nieuw]);
+        break;
+    }
+
+    // IT: replace an account's password with a new temporary password
+    // (shown once; we also try to email it).
+    case 'wachtwoord_vervangen': {
+        require_role(['admin']);
+        if (!heeft_vaste_it()) alleen_it_melding(); // not with temporary IT rights
+        $in = json_input();
+        $id = trim($in['id'] ?? '');
+        if ($id === '' || $id === DEMO_ACCOUNT_ID) respond(['error' => 'Unknown member.'], 400);
+        $nieuwWw = substr(str_replace(['+', '/', '='], '', base64_encode(random_bytes(12))), 0, 12);
+        $users = read_json($usersPath, []);
+        $gevonden = null;
+        foreach ($users as &$u) {
+            if ($u['id'] === $id) { $u['passwordHash'] = password_hash($nieuwWw, PASSWORD_DEFAULT); $gevonden = $u; break; }
+        }
+        unset($u);
+        if (!$gevonden) respond(['error' => 'Member not found.'], 404);
+        write_json($usersPath, $users);
+        $verstuurd = !empty($gevonden['email']) ? @smtp_send(
+            $gevonden['email'],
+            'New password for the ' . DISTRICT_NAME . ' PI Work Portal',
+            "Hi " . ($gevonden['name'] ?? '') . ",\n\nThe IT administrator has set a new password for you.\n\n" .
+            "Log in: " . APP_URL . "/login.php\nEmail address: " . $gevonden['email'] . "\nTemporary password: $nieuwWw\n\n" .
+            "Please change it once you're logged in, via your profile."
+        ) : false;
+        respond(['ok' => true, 'wachtwoord' => $nieuwWw, 'verstuurd' => (bool)$verstuurd]);
+        break;
+    }
+
+    case 'gebruiker_verwijderen': {
+        require_role($ledenbeheerRollen);
         $id = $_GET['id'] ?? '';
         if ($id === '') respond(['error' => 'Unknown member.'], 400);
         if ($id === DEMO_ACCOUNT_ID) respond(['error' => 'The demo account isn\'t a real account and cannot be deleted.'], 400);
@@ -271,6 +338,7 @@ switch ($action) {
         $te_verwijderen = null;
         foreach ($users as $u) { if ($u['id'] === $id) { $te_verwijderen = $u; break; } }
         if (!$te_verwijderen) respond(['error' => 'Member not found.'], 404);
+        if (is_it_gebruiker($te_verwijderen) && !heeft_vaste_it()) alleen_it_melding();
 
         // Prevent removing the last IT administrator (yourself or the only
         // other admin) — otherwise no one could reach Member Management anymore.
@@ -291,8 +359,9 @@ switch ($action) {
     }
 
     case 'rollen_bijwerken': {
-        require_role(['admin']);
+        require_role($ledenbeheerRollen);
         $in = json_input();
+        if (is_array($in['roles'] ?? null) && in_array('admin', $in['roles'], true) && !heeft_vaste_it()) alleen_it_melding();
         $id = trim($in['id'] ?? '');
         $nieuweRollen = is_array($in['roles'] ?? null) ? array_values(array_intersect($in['roles'], array_keys(ROLES))) : [];
         if ($id === '') respond(['error' => 'Unknown member.'], 400);
@@ -303,6 +372,7 @@ switch ($action) {
         $eigenAccountZonderAdmin = false;
         foreach ($users as &$u) {
             if ($u['id'] === $id) {
+                if (is_it_gebruiker($u) && !heeft_vaste_it()) alleen_it_melding();
                 // Prevent accidentally removing the last/your own IT access
                 // without any other admin remaining — otherwise no one
                 // could reach the Member Management screen anymore.

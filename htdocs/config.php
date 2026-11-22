@@ -30,34 +30,90 @@ define('DATA_DIR', __DIR__ . '/data');
 // write to the server's default session folder — you'd get a
 // "Permission denied" error on login. To avoid that we simply store
 // sessions in our own (already protected) data folder.
+// Beveiliging: data/ bevat gebruikers, wachtwoord-hashes, financiële gegevens en
+// sessies en mag NOOIT rechtstreeks via het web te downloaden zijn. Op Apache
+// (ook InfinityFree) doet een .htaccess dat; we maken die hier zelf aan als
+// hij ontbreekt, zodat het niet afhangt van een handmatige stap bij het uploaden.
+function bescherm_datamap() {
+    if (!is_dir(DATA_DIR)) @mkdir(DATA_DIR, 0775, true);
+    $ht = DATA_DIR . '/.htaccess';
+    if (!file_exists($ht) || filesize($ht) < 10) {
+        @file_put_contents($ht,
+            "# Automatically created by the portal: this folder must never be reachable via the web.\n" .
+            "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n" .
+            "<IfModule !mod_authz_core.c>\n    Order allow,deny\n    Deny from all\n</IfModule>\n");
+    }
+    if (!file_exists(DATA_DIR . '/index.html')) @file_put_contents(DATA_DIR . '/index.html', '');
+}
+bescherm_datamap();
+
+// Some free hosting providers (e.g. InfinityFree) don't allow PHP to write
+// to the server's default session folder — you'd get a "Permission denied"
+// error on login. To avoid that we store sessions in our own (protected)
+// data folder.
 $sessionDir = __DIR__ . '/data/sessions';
 if (!is_dir($sessionDir)) {
     mkdir($sessionDir, 0775, true);
 }
 session_save_path($sessionDir);
 
+$__https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+ini_set('session.use_strict_mode', '1');   // geen sessie-ID's accepteren die de server niet zelf heeft uitgegeven
+ini_set('session.use_only_cookies', '1');  // nooit een sessie-ID uit de URL
 session_set_cookie_params([
     'lifetime' => 60 * 60 * 24 * 30, // stay logged in for 30 days
     'path' => '/',
+    'secure' => $__https,   // cookie alleen via https meesturen zodra de site via https wordt bezocht
+    'httponly' => true,     // niet uit te lezen door JavaScript (beperkt de schade van XSS)
     'samesite' => 'Lax',
 ]);
 session_start();
 
+// Standaard beveiligingskoppen (voor elke pagina en API die config.php laadt).
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');          // browser mag bestandstypes niet "raden"
+    header('X-Frame-Options: SAMEORIGIN');              // portaal kan niet in een frame op een andere site
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+}
+
+// OFF BY DEFAULT. Enable with: define('DEMO_ACCOUNT_ENABLED', true); in district.php.
 // Fixed, built-in demo account (username "dummy", password "dummy") — no
 // real account in users.json, purely a session marker. Allowed to VIEW
 // everything, but cannot perform any write action. That is enforced
 // centrally here so individual files don't each need their own check:
-// every POST request (= every create/update/delete/upload across the
+// every request that is not GET/HEAD (= every create/update/delete/upload across the
 // whole application) is blocked, except logging in/out itself (which
 // goes through auth.php and must always keep working).
 define('DEMO_ACCOUNT_ID', 'demo-dummy-account');
 function is_demo_gebruiker() {
     return ($_SESSION['user_id'] ?? '') === DEMO_ACCOUNT_ID;
 }
-if (is_demo_gebruiker() && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'auth.php') {
+if (is_demo_gebruiker() && !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true) && basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'auth.php') {
     header('Content-Type: application/json; charset=utf-8');
     http_response_code(403);
     echo json_encode(['error' => 'This is the demo account — viewing only. Changing, creating, submitting, or registering is not possible with it.']);
+    exit;
+}
+
+// State-changing actions must NEVER run through a plain GET request. A GET can
+// be triggered by a link, image or redirect on another site (CSRF) and used to
+// bypass the demo block above, which only looked at the request method.
+// Everything in api_*.php / auth.php / storage.php whose action name contains
+// a changing verb therefore requires POST (or PUT/DELETE).
+// New changing action? Give it a name with such a verb (create, update, delete,
+// upload, bijwerken, verwijderen, ...) and this works automatically.
+define('MUTERENDE_ACTIE_PATROON', '/(create|update|delete|upsert|import|upload|bijwerken|verwijderen|aanmaken|herordenen|verplaatsen|besluit|afwijzen|goedkeuren|inplannen|aanmelden|afmelden|toggle|verifieren|afhandelen|uitbetaald|indienen|vervangen|hernoemen|samenvoegen|wissen|herstellen|versturen|intrekken|beslissen|_add|abonnement)|^(reset|set)$/');
+$__script = basename($_SERVER['SCRIPT_NAME'] ?? '');
+$__actie = (string)($_GET['action'] ?? '');
+if ($__actie !== ''
+    && (strpos($__script, 'api_') === 0 || in_array($__script, ['auth.php', 'storage.php'], true))
+    && in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)
+    && preg_match(MUTERENDE_ACTIE_PATROON, $__actie)) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Allow: POST');
+    http_response_code(405);
+    echo json_encode(['error' => 'This action requires a POST request.']);
     exit;
 }
 
@@ -134,8 +190,52 @@ function current_user_role() {
     return $rollen[0] ?? 'liaison';
 }
 
+// The roles of the logged-in user, re-read from users.json on every request:
+// a role that IT revokes (or a deleted account) takes effect immediately, not only
+// at the next login.
+function gebruiker_basisrollen() {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $uid = $_SESSION['user_id'] ?? '';
+    $rollen = $_SESSION['user_roles'] ?? ['liaison'];
+    if ($uid !== '' && $uid !== DEMO_ACCOUNT_ID) {
+        $gevonden = false;
+        foreach (read_json(DATA_DIR . '/users.json', []) as $u) {
+            if (($u['id'] ?? null) === $uid) { $rollen = normaliseer_gebruiker_rollen($u)['roles']; $gevonden = true; break; }
+        }
+        if (!$gevonden) $rollen = ['liaison']; // account was deleted: no special role any more
+        $_SESSION['user_roles'] = $rollen;
+    }
+    return $cache = $rollen;
+}
+
+// Permanent IT administrator (role 'admin' on the account itself), so NOT someone with temporary IT rights.
+// For actions with lasting consequences for accounts or IT rights.
+function heeft_vaste_it() {
+    return in_array('admin', gebruiker_basisrollen(), true);
+}
+
+// Temporary IT rights (requested by a member, approved by IT via a link in the email).
+function it_tijdelijk_pad() { return DATA_DIR . '/it_tijdelijk.json'; }
+function it_tijdelijk_actief_tot($userId) {
+    static $cache = [];
+    if (array_key_exists($userId, $cache)) return $cache[$userId];
+    $nu = time() * 1000; $tot = null;
+    foreach (read_json(it_tijdelijk_pad(), []) as $a) {
+        if (($a['userId'] ?? '') === $userId && ($a['status'] ?? '') === 'goedgekeurd' && ($a['geldigTot'] ?? 0) > $nu) {
+            $tot = max($tot ?? 0, $a['geldigTot']);
+        }
+    }
+    return $cache[$userId] = $tot;
+}
+
 function current_user_roles() {
-    return $_SESSION['user_roles'] ?? ['liaison'];
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $rollen = gebruiker_basisrollen();
+    $uid = $_SESSION['user_id'] ?? '';
+    if ($uid !== '' && $uid !== DEMO_ACCOUNT_ID && !in_array('admin', $rollen, true) && it_tijdelijk_actief_tot($uid)) $rollen[] = 'admin';
+    return $cache = $rollen;
 }
 
 function heeft_rol($toegestaneRollen) {
@@ -184,6 +284,70 @@ function require_role($allowedRoles) {
     require_login();
     if (!heeft_rol($allowedRoles)) {
         respond(['error' => 'You are not permitted to perform this action.'], 403);
+    }
+}
+
+/**
+ * Only allow http(s) links. Prevents someone from saving a "javascript:..."
+ * address as a download link and running code for whoever clicks it.
+ * Returns an empty string if it is not a valid http(s) URL.
+ */
+function veilige_url($url) {
+    $url = trim((string)$url);
+    if ($url === '') return '';
+    // "www.example.com" without https:// is common input: add it ourselves.
+    if (!preg_match('#^[a-z][a-z0-9+.\-]*:#i', $url) && preg_match('#^[a-z0-9.\-]+\.[a-z]{2,}(/.*)?$#i', $url)) $url = 'https://' . $url;
+    if (!preg_match('#^https?://[^\s<>"\']+$#i', $url)) return '';
+    return $url;
+}
+
+/** Visitor IP address (behind Cloudflare the real address is in a header). */
+function klant_ip() {
+    foreach (['HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR'] as $k) {
+        $ip = $_SERVER[$k] ?? '';
+        if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+    }
+    return '0.0.0.0';
+}
+
+/**
+ * Simple request throttling (no database): keeps timestamps per key in
+ * data/rate_limit.json. rate_limit_toegestaan() only checks,
+ * rate_limit_registreer() counts an attempt. $venster is in seconds (max 1 hour).
+ */
+function rate_limit_toegestaan($sleutel, $max, $venster) {
+    $nu = time();
+    $data = read_json(DATA_DIR . '/rate_limit.json', []);
+    $tijden = array_filter($data[$sleutel] ?? [], fn($t) => $t > $nu - $venster);
+    return count($tijden) < $max;
+}
+function rate_limit_registreer($sleutel) {
+    $pad = DATA_DIR . '/rate_limit.json';
+    $nu = time();
+    $data = read_json($pad, []);
+    foreach ($data as $k => $tijden) {
+        $data[$k] = array_values(array_filter($tijden, fn($t) => $t > $nu - 3600));
+        if (!$data[$k]) unset($data[$k]);
+    }
+    $data[$sleutel][] = $nu;
+    write_json($pad, $data);
+}
+function rate_limit_wis($sleutel) {
+    $pad = DATA_DIR . '/rate_limit.json';
+    $data = read_json($pad, []);
+    if (isset($data[$sleutel])) { unset($data[$sleutel]); write_json($pad, $data); }
+}
+function te_veel_pogingen() {
+    respond(['error' => 'Too many attempts. Please try again in fifteen minutes.'], 429);
+}
+
+/** For test/helper scripts: logged-in IT admins only, never the demo account. */
+function require_it_pagina() {
+    if (empty($_SESSION['user_id']) || is_demo_gebruiker() || !heeft_rol(['admin'])) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Only for logged-in IT admins (not the demo account). Log in to the portal first.\n";
+        exit;
     }
 }
 
@@ -268,7 +432,7 @@ function smtp_send($to, $subject, $body) {
  * the in-portal message still stands — that should never block the rest
  * of the action.
  */
-function notify($userIds, $titel, $tekst, $link = null) {
+function notify($userIds, $titel, $tekst, $link = null, $mail = true) {
     foreach ((array)$userIds as $userId) {
         if (!$userId) continue;
         $path = DATA_DIR . '/berichten/' . preg_replace('/[^a-z0-9@._\-]/i', '_', $userId) . '.json';
@@ -285,7 +449,7 @@ function notify($userIds, $titel, $tekst, $link = null) {
         write_json($path, $berichten);
     }
 
-    if (defined('SMTP_HOST') && SMTP_HOST !== '') {
+    if ($mail && defined('SMTP_HOST') && SMTP_HOST !== '') {
         $users = read_json(DATA_DIR . '/users.json', []);
         foreach ($users as $u) {
             if (in_array($u['id'], (array)$userIds, true) && !empty($u['email'])) {
@@ -295,22 +459,29 @@ function notify($userIds, $titel, $tekst, $link = null) {
     }
 }
 
+function notify_zonder_mail($userIds, $titel, $tekst, $link = null) { notify($userIds, $titel, $tekst, $link, false); }
+
 /**
  * Sends a notification to everyone holding a given role (e.g. all Print
- * Coordinators), plus always to all admins. If no one currently holds
- * that role yet (member management still needs to assign it), this
- * falls back to the fixed email address in district.php
- * (COORDINATOR_EMAILS) so a notification is never simply lost.
+ * Coordinators), plus always to all admins. Role holders follow automatically
+ * from Member Management (assign a role = that person receives the
+ * notifications from then on). If no one holds the role yet, this falls back
+ * to the optional fixed email address in district.php (COORDINATOR_EMAILS).
  */
 function notify_role($role, $titel, $tekst, $link = null) {
     $users = read_json(DATA_DIR . '/users.json', []);
-    $ontvangers = array_column(array_filter($users, fn($u) => ($u['role'] ?? 'liaison') === $role || ($u['role'] ?? '') === 'admin'), 'id');
-    if (!empty($ontvangers)) {
-        notify($ontvangers, $titel, $tekst, $link);
-        return;
+    $houders = []; $admins = [];
+    foreach ($users as $u) {
+        $rollen = normaliseer_gebruiker_rollen($u)['roles'];
+        if (in_array($role, $rollen, true)) $houders[] = $u['id'];
+        if (in_array('admin', $rollen, true)) $admins[] = $u['id'];
     }
-    if (defined('COORDINATOR_EMAILS') && !empty(COORDINATOR_EMAILS[$role])) {
-        @smtp_send(COORDINATOR_EMAILS[$role], $titel, $tekst);
+    // Whoever holds the role (via Member Management) receives the notification automatically, plus IT.
+    $ontvangers = array_values(array_unique(array_merge($houders, $admins)));
+    if (!empty($ontvangers)) notify($ontvangers, $titel, $tekst, $link);
+    // If no one holds the role yet, fall back to the (optional) fixed address in district.php.
+    if (empty($houders) && defined('COORDINATOR_EMAILS') && !empty(COORDINATOR_EMAILS[$role])) {
+        @smtp_send(COORDINATOR_EMAILS[$role], $titel, $tekst . ($link ? "\n\n" . APP_URL . $link : ''));
     }
 }
 
@@ -350,4 +521,5 @@ ensure_dir(DATA_DIR . '/financien/reroutes');
 ensure_dir(DATA_DIR . '/financien/derving');
 ensure_dir(DATA_DIR . '/drive_database/items');
 ensure_dir(DATA_DIR . '/drive_database/thumbnails');
+ensure_dir(DATA_DIR . '/drive_database/subcategorieen');
 ensure_dir(DATA_DIR . '/profielfotos');

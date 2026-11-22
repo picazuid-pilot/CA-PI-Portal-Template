@@ -30,7 +30,7 @@ if (empty($_SESSION['user_id'])) {
 </div>
 
 <script>
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 async function laadProfielen() {
   const res = await fetch('api_members.php?action=profielen_overzicht', { cache: 'no-store' });

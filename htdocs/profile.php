@@ -4,7 +4,7 @@ if (empty($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
-$magAnderenBewerken = heeft_rol(['admin', 'secretary']);
+$magAnderenBewerken = heeft_rol(['admin', 'chair', 'secretary']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -43,7 +43,7 @@ $magAnderenBewerken = heeft_rol(['admin', 'secretary']);
     </div>
 
     <label style="margin-top:10px;">Name</label><input id="p-naam" />
-    <label>Email address (login, cannot be changed)</label><input id="p-email" disabled style="background:var(--primary-light-95);" />
+    <label>Email address (login; IT can change it)</label><input id="p-email" disabled style="background:var(--primary-light-95);" />
     <div class="form-grid">
       <div><label>Phone</label><input id="p-telefoon" /></div>
       <div><label>Emergency contact (name + phone, optional)</label><input id="p-noodcontact" /></div>
@@ -58,14 +58,52 @@ $magAnderenBewerken = heeft_rol(['admin', 'secretary']);
     </div>
   </div>
 
+  <?php if (!is_demo_gebruiker() && !heeft_vaste_it()): ?>
+  <div class="card" id="it-aanvraag-kaart" style="margin-top:16px;">
+    <strong>Temporary IT rights</strong>
+    <p style="color:var(--grey); font-size:12.5px; margin:4px 0 10px;">Is IT unavailable and something needs to be done? Request temporary IT rights. IT receives an email, chooses whether and for how long, and you get notified. Permanent IT actions (granting the IT role, changing IT accounts or passwords) always stay with a permanent IT administrator.</p>
+    <div id="it-aanvraag-inhoud">Loading…</div>
+  </div>
+  <?php endif; ?>
+
 </div>
 
 <script>
+// ---- Request temporary IT rights ----
+async function itAanvraagLaad() {
+  const el = document.getElementById('it-aanvraag-inhoud'); if (!el) return;
+  const res = await fetch('api_it_tijdelijk.php?action=aanvraag_status', { cache: 'no-store' });
+  const d = await res.json();
+  const tijd = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (d.actiefTot) {
+    el.innerHTML = `<p><span class="badge groen">Active</span> You have temporary IT rights until <strong>${tijd(d.actiefTot)}</strong>.</p><button class="secondary" onclick="itAanvraagIntrekken()">End now</button>`;
+  } else if (d.status === 'wacht') {
+    el.innerHTML = `<p><span class="badge geel">Waiting for IT</span> Your request has been sent; you will be notified as soon as IT has responded.</p><button class="secondary" onclick="itAanvraagIntrekken()">Withdraw request</button>`;
+  } else {
+    const eerder = d.status === 'afgewezen' ? '<p style="color:var(--grey); font-size:12.5px;">Your previous request was rejected.</p>' : '';
+    el.innerHTML = `${eerder}<label>What do you need it for? (optional, IT will see this)</label><input id="it-reden" maxlength="300" placeholder="e.g. the flyers are missing from the database" /><div style="margin-top:10px;"><button class="primary" onclick="itAanvraagIndienen()">Request temporary IT rights</button></div>`;
+  }
+}
+async function itAanvraagIndienen() {
+  const reden = document.getElementById('it-reden').value;
+  const res = await fetch('api_it_tijdelijk.php?action=aanvraag_indienen', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reden }) });
+  const d = await res.json();
+  if (!res.ok) { alert(d.error || 'Request failed.'); return; }
+  itAanvraagLaad();
+}
+async function itAanvraagIntrekken() {
+  await fetch('api_it_tijdelijk.php?action=aanvraag_intrekken', { method: 'POST', credentials: 'same-origin' });
+  itAanvraagLaad();
+}
+itAanvraagLaad();
+</script>
+
+<script>
 const magAnderenBewerken = <?= $magAnderenBewerken ? 'true' : 'false' ?>;
-const eigenUserId = <?= json_encode($_SESSION['user_id']) ?>;
+const eigenUserId = <?= json_encode($_SESSION['user_id'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 let huidigProfielId = eigenUserId;
 
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 async function init() {
   const paramId = new URLSearchParams(location.search).get('id');

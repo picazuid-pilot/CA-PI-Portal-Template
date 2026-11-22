@@ -154,19 +154,17 @@ define('LOCAL_ATTACHMENTS_LIMIT_MB', 400); // this is the max of mb that will be
 // Requires the key file 'google_service_account.json' in the (protected)
 // data/ folder. Uses the DRIVE_FOLDER_ID defined above.
 
-// ---- Fixed fallback email addresses for coordinators --------
-// As soon as someone is given a coordinator role (e.g.
-// 'coordinator_distribution', 'coordinator_outreach', 'media_coordinator',
-// 'social_media_coordinator') via the member-management screen,
-// notifications go automatically to that person instead of the address
-// below. Until then (or if for whatever reason no one currently holds
-// that role), the system falls back to these addresses, so a
+// ---- Optional fallback email addresses for coordinators --------
+// You normally do NOT need to fill this in. As soon as someone is given a
+// role (e.g. 'coordinator_distribution', 'coordinator_outreach',
+// 'media_coordinator', 'social_media_coordinator') via Member Management,
+// that person automatically receives the notifications for that role
+// (IT administrators always receive them too). Only when no one holds a
+// role yet does the system fall back to the address below, so a
 // notification is never simply lost. This includes, for example, new
-// campaign/campaign-idea submissions: physical ones notify whoever holds
-// 'media_coordinator', online/social ones notify 'social_media_coordinator'
-// (see the PI Locations module).
-// Keys here MUST exactly match the keys used in the ROLES array above —
-// this is only a fallback lookup by that exact key.
+// campaign/idea submissions: physical ones notify whoever holds
+// 'media_coordinator', online/social ones notify 'social_media_coordinator'.
+// Keys here MUST exactly match the keys used in the ROLES array above.
 const COORDINATOR_EMAILS = [
     'coordinator_outreach' => '',
     'coordinator_distribution' => '',
@@ -220,3 +218,10 @@ const ROLES = [
     'social_media_coordinator'  	=> 'PI Social Media Coordinator',
     'liaison'                       	=> 'Group PI Liaison',
 ];
+
+// ---- Demo account (OFF by default) ------------------------------------
+// A built-in read-only "dummy" account (login: dummy / dummy) lets people
+// look around without being able to change anything. It is OFF by default.
+// Remove the two slashes in front of the line below to switch it on, e.g.
+// for a presentation. Leave it off on a live portal with real data.
+// define('DEMO_ACCOUNT_ENABLED', true);

@@ -424,8 +424,8 @@ const isFinancien = <?= $isFinancien ? 'true' : 'false' ?>;
 const magVerifieren = <?= $magVerifieren ? 'true' : 'false' ?>;
 const standaardCategorieen = <?= json_encode(TRANSACTION_CATEGORIES, JSON_UNESCAPED_UNICODE) ?>;
 const magDerving = <?= $magDerving ? 'true' : 'false' ?>;
-const eigenUserId = <?= json_encode($eigenUserId) ?>;
-const eigenUserNaam = <?= json_encode($_SESSION['user_name'] ?? '') ?>;
+const eigenUserId = <?= json_encode($eigenUserId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+const eigenUserNaam = <?= json_encode($_SESSION['user_name'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 let huidigeTransactieId = null;
 let huidigAanvraagType = 'declaratie';
 let huidigeAanvraagIdBewerken = null;
@@ -441,7 +441,7 @@ function toonView(v) {
   ['balans','boekhouding','aanvragen','posten','reroutes'].forEach(x => document.getElementById('view-' + x).style.display = x === v ? '' : 'none');
 }
 function sluitModal(id) { document.getElementById(id).style.display = 'none'; }
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 let datumformaatVolgorde = 'dmy';
 function formatDatum(iso) {
@@ -717,9 +717,9 @@ async function laadAanvragen() {
     const isEigen = a.aanvragerId === eigenUserId;
     const magBewerken = a.status === 'open' && (isEigen || isFinancien);
     let acties = '';
-    if (magBewerken) acties += `<button class="secondary" onclick='openAanvraagForm(${JSON.stringify(a.type)}, ${JSON.stringify(a)})'>Edit</button> `;
-    if (isFinancien && a.status === 'open') acties += `<button class="secondary" onclick='openBesluitForm(${JSON.stringify(a)})'>Review</button> `;
-    if (isEigen && a.status === 'goedgekeurd' && !a.betaalgegevens) acties += `<button class="secondary" onclick='openBetaalgegevensForm(${JSON.stringify(a)})'>Submit payment details</button> `;
+    if (magBewerken) acties += `<button class="secondary" onclick="openAanvraagForm(${escapeHtml(JSON.stringify(a.type))}, ${escapeHtml(JSON.stringify(a))})">Edit</button> `;
+    if (isFinancien && a.status === 'open') acties += `<button class="secondary" onclick="openBesluitForm(${escapeHtml(JSON.stringify(a))})">Review</button> `;
+    if (isEigen && a.status === 'goedgekeurd' && !a.betaalgegevens) acties += `<button class="secondary" onclick="openBetaalgegevensForm(${escapeHtml(JSON.stringify(a))})">Submit payment details</button> `;
     if (isFinancien && a.status === 'goedgekeurd' && a.betaalgegevens) acties += `<button class="primary" onclick="markeerUitbetaald('${a.id}')">Mark as paid</button> `;
     if (isFinancien) acties += `<button class="secondary" onclick="verwijderAanvraag('${a.id}')">✕</button>`;
 
@@ -888,7 +888,7 @@ async function laadRelaties() {
       <td>${typeLabel[r.type]}</td>
       <td>${escapeHtml(r.contactpersoon || '—')}</td>
       <td>${escapeHtml(r.email || '—')}</td>
-      <td>${isFinancien ? `<button class="secondary" onclick='openRelatieForm(${JSON.stringify(r)})'>Edit</button> <button class="secondary" onclick="relatieVerwijderen('${r.id}')">✕</button>` : ''}</td>
+      <td>${isFinancien ? `<button class="secondary" onclick="openRelatieForm(${escapeHtml(JSON.stringify(r))})">Edit</button> <button class="secondary" onclick="relatieVerwijderen('${r.id}')">✕</button>` : ''}</td>
     </tr>`).join('') || '<tr><td colspan="5">No contacts yet.</td></tr>';
 }
 
@@ -948,8 +948,8 @@ async function laadPosten() {
       <td>${euro(p.totaalbedrag - p.afgehandeldBedrag)}</td>
       <td><span class="badge ${statusBadge[p.status]}">${p.status.replace('_', ' ')}</span></td>
       <td style="white-space:nowrap;">
-        ${(isFinancien || p.createdBy === eigenUserNaam) && p.status === 'open' && p.afgehandeldBedrag === 0 ? `<button class="secondary" onclick='openPostForm(${JSON.stringify(p)})'>Edit</button> ` : ''}
-        ${isFinancien && p.status !== 'afgehandeld' ? `<button class="secondary" onclick='openAfhandelenForm(${JSON.stringify(p)})'>Settle</button> ` : ''}
+        ${(isFinancien || p.createdBy === eigenUserNaam) && p.status === 'open' && p.afgehandeldBedrag === 0 ? `<button class="secondary" onclick="openPostForm(${escapeHtml(JSON.stringify(p))})">Edit</button> ` : ''}
+        ${isFinancien && p.status !== 'afgehandeld' ? `<button class="secondary" onclick="openAfhandelenForm(${escapeHtml(JSON.stringify(p))})">Settle</button> ` : ''}
         ${isFinancien ? `<button class="secondary" style="color:#c9432f; border-color:#c9432f;" onclick="verwijderPost('${p.id}', ${p.afgehandeldBedrag > 0})">✕</button>` : ''}
       </td>
     </tr>`).join('') || '<tr><td colspan="8">No resales yet.</td></tr>';
@@ -1249,13 +1249,13 @@ async function laadReroutes() {
     const verschil = Math.round((r.totaalBijdragen - totaalUit) * 100) / 100;
     const aantalUit = r.aankopen.length + (r.bijkomendeKosten?.length || 0);
     return `<tr>
-      <td style="cursor:pointer;" onclick='toonRerouteGraph(${JSON.stringify(r.id)})'>${escapeHtml(r.nummer)}</td>
-      <td style="cursor:pointer;" onclick='toonRerouteGraph(${JSON.stringify(r.id)})'>${escapeHtml(r.titel)}</td>
-      <td style="cursor:pointer;" onclick='toonRerouteGraph(${JSON.stringify(r.id)})'>${euro(r.totaalBijdragen)} <span style="color:var(--grey); font-size:11.5px;">(${r.bijdragen.length}x)</span></td>
-      <td style="cursor:pointer;" onclick='toonRerouteGraph(${JSON.stringify(r.id)})'>${euro(totaalUit)} <span style="color:var(--grey); font-size:11.5px;">(${aantalUit}x)</span></td>
-      <td style="cursor:pointer;" onclick='toonRerouteGraph(${JSON.stringify(r.id)})'>${verschil === 0 ? '<span class="badge groen">balanced</span>' : `<span class="badge ${verschil > 0 ? 'geel' : 'rood'}">${euro(Math.abs(verschil))} ${verschil > 0 ? 'surplus' : 'shortfall'}</span>`}</td>
+      <td style="cursor:pointer;" onclick="toonRerouteGraph(${escapeHtml(JSON.stringify(r.id))})">${escapeHtml(r.nummer)}</td>
+      <td style="cursor:pointer;" onclick="toonRerouteGraph(${escapeHtml(JSON.stringify(r.id))})">${escapeHtml(r.titel)}</td>
+      <td style="cursor:pointer;" onclick="toonRerouteGraph(${escapeHtml(JSON.stringify(r.id))})">${euro(r.totaalBijdragen)} <span style="color:var(--grey); font-size:11.5px;">(${r.bijdragen.length}x)</span></td>
+      <td style="cursor:pointer;" onclick="toonRerouteGraph(${escapeHtml(JSON.stringify(r.id))})">${euro(totaalUit)} <span style="color:var(--grey); font-size:11.5px;">(${aantalUit}x)</span></td>
+      <td style="cursor:pointer;" onclick="toonRerouteGraph(${escapeHtml(JSON.stringify(r.id))})">${verschil === 0 ? '<span class="badge groen">balanced</span>' : `<span class="badge ${verschil > 0 ? 'geel' : 'rood'}">${euro(Math.abs(verschil))} ${verschil > 0 ? 'surplus' : 'shortfall'}</span>`}</td>
       <td style="white-space:nowrap;">
-        ${isFinancien ? `<button class="secondary" onclick='openRerouteForm(${JSON.stringify(r)})'>Edit</button> <button class="secondary" onclick="verwijderReroute('${r.id}')">✕</button>` : ''}
+        ${isFinancien ? `<button class="secondary" onclick="openRerouteForm(${escapeHtml(JSON.stringify(r))})">Edit</button> <button class="secondary" onclick="verwijderReroute('${r.id}')">✕</button>` : ''}
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="6">No joint purchases yet.</td></tr>';

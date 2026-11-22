@@ -60,7 +60,7 @@ if (form) {
     const res = await fetch('auth.php?action=reset_password', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: <?= json_encode($token) ?>, wachtwoord: p1 }),
+      body: JSON.stringify({ token: <?= json_encode($token, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>, wachtwoord: p1 }),
     });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Something went wrong.'; return; }

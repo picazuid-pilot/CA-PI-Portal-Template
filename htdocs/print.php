@@ -35,7 +35,7 @@ $isCoordinator = heeft_rol(['admin', 'coordinator_distribution']);
   <div id="view-voorraad" class="card">
     <div class="toolbar">
       <strong>Regional stock</strong>
-      <?php if ($isCoordinator): ?><button class="primary" onclick="openVoorraadItem()">+ Add item</button><?php endif; ?>
+      <?php if ($isCoordinator): ?><div style="display:flex; gap:8px;"><button class="secondary" onclick="openVoorraadSubcatForm()">+ Subcategory</button><button class="primary" onclick="openVoorraadItem()">+ Add item</button></div><?php endif; ?>
     </div>
     <table>
       <thead><tr><th>Preview</th><th>Item</th><th>Stock</th><th>Minimum</th><th>Value/unit</th><th>Total value</th><th></th><th></th></tr></thead>
@@ -112,6 +112,7 @@ $isCoordinator = heeft_rol(['admin', 'coordinator_distribution']);
     <button class="modal-close" onclick="sluitModal('modal-voorraad')">✕</button>
     <h2 id="voorraad-titel">Stock item</h2>
     <label>Name</label><input id="v-naam" placeholder="e.g. Flyer A5 - What is CA" />
+    <label>Subcategory</label><select id="v-subcat"></select>
     <label>Unit</label><input id="v-eenheid" value="pieces" />
     <div class="form-grid">
       <div><label>Current stock</label><input id="v-huidig" type="number" min="0" /></div>
@@ -132,6 +133,16 @@ $isCoordinator = heeft_rol(['admin', 'coordinator_distribution']);
         <button class="primary" onclick="opslaanVoorraad()">Save</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ===== Modal: stock subcategory ===== -->
+<div id="modal-vsubcat" class="modal-backdrop" style="display:none;" onclick="if(event.target===this) sluitModal('modal-vsubcat')">
+  <div class="modal" style="max-width:380px;">
+    <button class="modal-close" onclick="sluitModal('modal-vsubcat')">✕</button>
+    <h2 id="vsc-kop">Add subcategory</h2>
+    <label>Name</label><input id="vsc-naam" maxlength="60" placeholder="e.g. Flyers, Folders, Posters" onkeydown="if(event.key==='Enter') voorraadSubcatOpslaan()" />
+    <div style="margin-top:14px; text-align:right;"><button class="primary" onclick="voorraadSubcatOpslaan()">Save</button></div>
   </div>
 </div>
 
@@ -265,7 +276,7 @@ $isCoordinator = heeft_rol(['admin', 'coordinator_distribution']);
 
 <script>
 const isCoordinator = <?= $isCoordinator ? 'true' : 'false' ?>;
-const eigenUserId = <?= json_encode($_SESSION['user_id']) ?>;
+const eigenUserId = <?= json_encode($_SESSION['user_id'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 let voorraadData = [];
 let pakkettenData = [];
 let huidigVoorraadId = null;
@@ -278,7 +289,8 @@ function toonView(v) {
   ['voorraad','aanvragen','bestellingen','pakketten','leveranciers'].forEach(x => document.getElementById('view-' + x).style.display = x === v ? '' : 'none');
 }
 function sluitModal(id) { document.getElementById(id).style.display = 'none'; }
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function veiligeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : '#'; } // alleen http(s)-links klikbaar
 
 let datumformaatVolgorde = 'dmy';
 function formatDatum(iso) {
@@ -340,10 +352,50 @@ async function laadVoorraad() {
   const res = await fetch('api_print.php?action=voorraad_list');
   const data = await res.json();
   voorraadData = data.voorraad;
-  document.getElementById('voorraad-body').innerHTML = voorraadData.map(v => {
+  voorraadSubcats = data.subcategorieen || [];
+  renderVoorraad();
+}
+
+// ---- Stock: subcategories + drag-and-drop (Print Coordinator / IT) ----------------
+let voorraadSubcats = [];
+let vsBewerkId = null;
+let voorraadSleepId = null;
+const vsDicht = (() => { try { return JSON.parse(localStorage.getItem('voorraadSubcatsDicht') || '[]'); } catch (e) { return []; } })();
+function vsOnthoudDicht() { try { localStorage.setItem('voorraadSubcatsDicht', JSON.stringify(vsDicht)); } catch (e) {} }
+
+function renderVoorraad() {
+  const rijen = (items) => items.map(v => voorraadRij(v)).join('');
+  const groepen = voorraadSubcats.map(c => ({ id: c.id, naam: c.naam, items: voorraadData.filter(v => v.subcategorieId === c.id) }));
+  const bekend = new Set(voorraadSubcats.map(c => c.id));
+  const los = voorraadData.filter(v => !v.subcategorieId || !bekend.has(v.subcategorieId));
+  let html = '';
+  if (!voorraadSubcats.length) {
+    html = rijen(voorraadData);
+  } else {
+    const kop = (g, i) => {
+      const dicht = vsDicht.includes(g.id || 'los');
+      const beheer = (isCoordinator && g.id) ? `
+        <span style="float:right; white-space:nowrap;">
+          <button class="secondary" style="padding:1px 7px;" data-vsactie="omhoog" data-id="${escapeHtml(g.id)}" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="secondary" style="padding:1px 7px;" data-vsactie="omlaag" data-id="${escapeHtml(g.id)}" ${i === groepen.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="secondary" style="padding:1px 7px;" data-vsactie="hernoem" data-id="${escapeHtml(g.id)}">✎</button>
+          <button class="secondary" style="padding:1px 7px;" data-vsactie="verwijder" data-id="${escapeHtml(g.id)}">✕</button>
+        </span>` : '';
+      return `<tr class="vs-kop" data-subcat="${escapeHtml(g.id || '')}" style="background:var(--primary-light-95);">
+        <td colspan="8" style="cursor:pointer;" data-vsactie="klap" data-id="${escapeHtml(g.id || 'los')}">
+          ${dicht ? '▸' : '▾'} <strong>${escapeHtml(g.naam)}</strong> <span class="badge grijs">${g.items.length}</span>${beheer}
+        </td></tr>`;
+    };
+    groepen.forEach((g, i) => { html += kop(g, i); if (!vsDicht.includes(g.id)) html += rijen(g.items) || `<tr class="vs-leeg" data-subcat="${escapeHtml(g.id)}"><td colspan="8" style="color:var(--grey); font-size:12px;">${isCoordinator ? 'Drag items here' : 'No items'}</td></tr>`; });
+    if (los.length || isCoordinator) { html += kop({ id: '', naam: 'Unsorted', items: los }, -1); if (!vsDicht.includes('los')) html += rijen(los); }
+  }
+  document.getElementById('voorraad-body').innerHTML = html || '<tr><td colspan="8">No stock items yet.</td></tr>';
+}
+
+function voorraadRij(v) {
     const laag = v.huidigeVoorraad <= v.minimumVoorraad;
     const totaal = v.waardePerStuk !== null ? v.huidigeVoorraad * v.waardePerStuk : null;
-    return `<tr>
+    return `<tr class="vs-rij" data-id="${escapeHtml(v.id)}" data-subcat="${escapeHtml(v.subcategorieId || '')}" ${isCoordinator ? 'draggable="true"' : ''}>
       <td>
         ${renderVoorraadThumbnail(v)}
         ${isCoordinator ? `<input type="file" id="vthumb-input-${v.id}" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,.pdf" style="display:none;" onchange="voorraadThumbnailUploaden('${v.id}', this)" /><button class="secondary" style="font-size:10px; padding:2px 6px; margin-top:3px;" onclick="document.getElementById('vthumb-input-${v.id}').click()">🖼️</button>` : ''}
@@ -353,11 +405,9 @@ async function laadVoorraad() {
       <td>${v.minimumVoorraad}</td>
       <td>${v.waardePerStuk !== null ? euro(v.waardePerStuk) : '—'}</td>
       <td>${totaal !== null ? euro(totaal) : '—'}</td>
-      <td>${isCoordinator ? `<button class="secondary" onclick='openVoorraadItem(${JSON.stringify(v.id)})'>Edit</button>` : ''}</td>
+      <td>${isCoordinator ? `<button class="secondary" onclick="openVoorraadItem(${escapeHtml(JSON.stringify(v.id))})">Edit</button>` : ''}</td>
       <td>${isCoordinator ? `<button class="secondary" onclick="verwijderVoorraad('${v.id}')">Delete</button>` : ''}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8">No stock items yet.</td></tr>';
-
 }
 
 function renderVoorraadThumbnail(v) {
@@ -392,7 +442,7 @@ function toonGrootVoorraadVoorbeeld(evt, type, pad) {
     video.src = src; video.style.display = 'block';
     video.currentTime = 0; video.play().catch(() => {});
   } else if (type === 'pdf') {
-    pdf.src = src; pdf.style.display = 'block';
+    pdf.src = src + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH'; pdf.style.display = 'block'; // hide the PDF viewer's top bar
   }
   overlay.style.display = 'block';
   verplaatsGrootVoorraadVoorbeeld(evt);
@@ -438,6 +488,9 @@ function openVoorraadItem(id) {
   document.getElementById('v-gewicht-per').value = item?.gewichtPerAantal ?? 1;
   document.getElementById('v-notitie').value = item?.notitie || '';
   document.getElementById('v-geschiedenis-knop').style.display = item ? '' : 'none';
+  const sel = document.getElementById('v-subcat');
+  sel.innerHTML = '<option value="">Unsorted</option>' + voorraadSubcats.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.naam)}</option>`).join('');
+  sel.value = item?.subcategorieId || '';
   document.getElementById('modal-voorraad').style.display = 'flex';
 }
 
@@ -482,12 +535,91 @@ async function opslaanVoorraad() {
     gewicht: document.getElementById('v-gewicht').value,
     gewichtPerAantal: document.getElementById('v-gewicht-per').value,
     notitie: document.getElementById('v-notitie').value,
+    subcategorieId: document.getElementById('v-subcat').value || null,
   };
   if (!body.naam.trim()) { alert('Name is required.'); return; }
   const res = await fetch('api_print.php?action=voorraad_upsert', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { alert('Save failed (do you have permission for this?).'); return; }
   sluitModal('modal-voorraad');
   laadVoorraad();
+}
+
+function openVoorraadSubcatForm(bestaand) {
+  vsBewerkId = bestaand ? bestaand.id : null;
+  document.getElementById('vsc-kop').textContent = bestaand ? 'Rename subcategory' : 'Add subcategory';
+  document.getElementById('vsc-naam').value = bestaand ? bestaand.naam : '';
+  document.getElementById('modal-vsubcat').style.display = 'flex';
+  setTimeout(() => document.getElementById('vsc-naam').focus(), 30);
+}
+
+async function vsPost(actie, body, id) {
+  const res = await fetch('api_print.php?action=' + actie + (id ? '&id=' + encodeURIComponent(id) : ''), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.error || 'Action failed.'); return null; }
+  return data;
+}
+
+async function voorraadSubcatOpslaan() {
+  const naam = document.getElementById('vsc-naam').value;
+  const data = await (vsBewerkId ? vsPost('voorraad_subcat_update', { naam }, vsBewerkId) : vsPost('voorraad_subcat_create', { naam }));
+  if (!data) return;
+  sluitModal('modal-vsubcat');
+  voorraadSubcats = data.subcategorieen; renderVoorraad();
+}
+
+async function verplaatsVoorraadItem(id, subcatId) {
+  const data = await vsPost('voorraad_item_verplaatsen', { id, subcategorieId: subcatId || null });
+  if (data) { voorraadData = data.voorraad; renderVoorraad(); }
+}
+
+// Clicking the header rows (open/close, rename, order, delete)
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-vsactie]');
+  if (!el) return;
+  const actie = el.dataset.vsactie, id = el.dataset.id;
+  if (actie === 'klap') {
+    const i = vsDicht.indexOf(id); if (i >= 0) vsDicht.splice(i, 1); else vsDicht.push(id);
+    vsOnthoudDicht(); renderVoorraad(); return;
+  }
+  if (!isCoordinator) return;
+  e.stopPropagation();
+  if (actie === 'hernoem') openVoorraadSubcatForm(voorraadSubcats.find(c => c.id === id));
+  else if (actie === 'verwijder') {
+    if (!confirm('Delete subcategory? The items remain and move to "Unsorted".')) return;
+    const data = await vsPost('voorraad_subcat_delete', {}, id);
+    if (data) { voorraadSubcats = data.subcategorieen; await laadVoorraad(); }
+  } else if (actie === 'omhoog' || actie === 'omlaag') {
+    const ids = voorraadSubcats.map(c => c.id), i = ids.indexOf(id), j = actie === 'omhoog' ? i - 1 : i + 1;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const data = await vsPost('voorraad_subcats_herordenen', { volgorde: ids });
+    if (data) { voorraadSubcats = data.subcategorieen; renderVoorraad(); }
+  }
+});
+
+// Drag-and-drop (Print Coordinator / IT only). On touch devices: choose the subcategory in the item form.
+if (isCoordinator) {
+  const body = () => document.getElementById('voorraad-body');
+  document.addEventListener('dragstart', (e) => {
+    const rij = e.target.closest && e.target.closest('tr.vs-rij');
+    if (!rij || !rij.draggable) return;
+    voorraadSleepId = rij.dataset.id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', voorraadSleepId);
+    rij.style.opacity = '0.5';
+  });
+  document.addEventListener('dragend', () => { voorraadSleepId = null; document.querySelectorAll('#voorraad-body tr').forEach(r => { r.style.opacity = ''; r.style.outline = ''; }); });
+  const doelRij = (e) => { const r = e.target.closest && e.target.closest('#voorraad-body tr'); return r && (r.classList.contains('vs-kop') || r.classList.contains('vs-rij') || r.classList.contains('vs-leeg')) ? r : null; };
+  document.addEventListener('dragover', (e) => { if (!voorraadSleepId) return; const r = doelRij(e); if (!r) return; e.preventDefault(); body().querySelectorAll('tr').forEach(x => x.style.outline = ''); r.style.outline = '2px dashed var(--primary)'; });
+  document.addEventListener('drop', (e) => {
+    if (!voorraadSleepId) return;
+    const r = doelRij(e); if (!r) return;
+    e.preventDefault();
+    const id = voorraadSleepId; voorraadSleepId = null;
+    const doel = r.dataset.subcat || '';
+    const item = voorraadData.find(v => v.id === id);
+    if (item && (item.subcategorieId || '') !== doel) verplaatsVoorraadItem(id, doel);
+  });
 }
 
 async function verwijderVoorraad(id) {
@@ -513,8 +645,8 @@ async function laadAanvragen() {
       <td><span class="badge ${statusBadge[a.status]}">${statusLabel[a.status] || a.status}</span></td>
       <td>${formatDatum(a.aangemaaktOp)}</td>
       <td style="white-space:nowrap;">
-        ${isCoordinator && a.status === 'open' ? `<button class="secondary" onclick='openBesluitForm(${JSON.stringify(a)})'>Review</button> ` : ''}
-        ${isEigenOpen ? `<button class="secondary" onclick='openAanvraagForm(${JSON.stringify(a)})'>Correct</button> ` : ''}
+        ${isCoordinator && a.status === 'open' ? `<button class="secondary" onclick="openBesluitForm(${escapeHtml(JSON.stringify(a))})">Review</button> ` : ''}
+        ${isEigenOpen ? `<button class="secondary" onclick="openAanvraagForm(${escapeHtml(JSON.stringify(a))})">Correct</button> ` : ''}
         ${isCoordinator || isEigenOpen ? `<button class="secondary" onclick="verwijderAanvraag('${a.id}')">Delete</button>` : ''}
       </td>
     </tr>`;
@@ -753,9 +885,9 @@ async function laadLeveranciers() {
         return tekst;
       };
       html += `<tr>
-        <td>${l.link ? `<a href="${escapeHtml(l.link)}" target="_blank" rel="noopener">${escapeHtml(l.leverancier)}</a>` : escapeHtml(l.leverancier)}${l.aantalVarianten > 1 ? ` <span class="badge grijs">${l.aantalVarianten} variants</span>` : ''}</td>
+        <td>${l.link ? `<a href="${escapeHtml(veiligeUrl(l.link))}" target="_blank" rel="noopener">${escapeHtml(l.leverancier)}</a>` : escapeHtml(l.leverancier)}${l.aantalVarianten > 1 ? ` <span class="badge grijs">${l.aantalVarianten} variants</span>` : ''}</td>
         <td>${cel('500')}</td><td>${cel('1000')}</td><td>${cel('2500')}</td><td>${cel('5000')}</td>
-        <td>${isCoordinator ? `<button class="secondary" onclick='openLeverancierForm(${JSON.stringify(l)})'>Edit</button> <button class="secondary" onclick="verwijderLeverancier('${l.id}')">✕</button>` : ''}</td>
+        <td>${isCoordinator ? `<button class="secondary" onclick="openLeverancierForm(${escapeHtml(JSON.stringify(l))})">Edit</button> <button class="secondary" onclick="verwijderLeverancier('${l.id}')">✕</button>` : ''}</td>
       </tr>`;
     });
     html += `</tbody></table>`;
@@ -823,7 +955,7 @@ async function laadPakketten() {
     <div class="card" style="margin-bottom:12px; padding:14px;">
       <div class="toolbar" style="margin-bottom:6px;">
         <strong>${escapeHtml(p.naam)} <span class="badge grijs">${p.type === 'literatuur_pakket' ? 'literature package' : 'PI package'}</span></strong>
-        ${isCoordinator ? `<div class="right"><button class="secondary" onclick='openPakketForm(${JSON.stringify(p)})'>Edit</button> <button class="secondary" onclick="verwijderPakket('${p.id}')">Delete</button></div>` : ''}
+        ${isCoordinator ? `<div class="right"><button class="secondary" onclick="openPakketForm(${escapeHtml(JSON.stringify(p))})">Edit</button> <button class="secondary" onclick="verwijderPakket('${p.id}')">Delete</button></div>` : ''}
       </div>
       <p style="font-size:13px; color:var(--grey); margin:4px 0;">${p.items.map(it => escapeHtml(it.aantal + 'x ' + it.naam)).join(', ')}</p>
       ${(p.prijsHoog || p.prijsMiddel || p.prijsLaag) ? `<p style="font-size:12px; color:var(--grey); margin:4px 0;">Price per package — high: ${euro(p.prijsHoog)}, medium: ${euro(p.prijsMiddel)}, low: ${euro(p.prijsLaag)}</p>` : ''}
@@ -920,7 +1052,7 @@ if (leverancierCsvInput) {
 <div id="vvoorbeeld-overlay" style="display:none; position:fixed; z-index:999; pointer-events:none; background:#111; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.35); overflow:hidden;">
   <img id="vvoorbeeld-img" style="display:none; max-width:420px; max-height:420px; display:block;" />
   <video id="vvoorbeeld-video" style="display:none; max-width:420px; max-height:420px; display:block;" muted loop playsinline></video>
-  <iframe id="vvoorbeeld-pdf" style="display:none; width:340px; height:440px; border:none;"></iframe>
+  <iframe id="vvoorbeeld-pdf" style="display:none; width:340px; height:476px; margin-top:-36px; clip-path:inset(36px 0 0 0); border:none;"></iframe>
 </div>
 
 </body>
